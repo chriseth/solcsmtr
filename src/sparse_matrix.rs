@@ -1,5 +1,6 @@
 use std::iter;
 
+#[derive(Default)]
 struct Entry<T> {
     value: T,
     col: Index,
@@ -59,7 +60,10 @@ impl<'a, T> Iterator for EntryIterator<'a, T> {
     }
 }
 
-impl<T> SparseMatrix<T> {
+impl<T> SparseMatrix<T>
+where
+    T: Default + Clone + std::ops::MulAssign + std::cmp::PartialEq + From<u32>,
+{
     pub fn new() -> Self {
         Self {
             entries: vec![],
@@ -88,6 +92,21 @@ impl<T> SparseMatrix<T> {
         }
     }
 
+    // pub fn multiply_row_by_factor(&mut self, row: usize, f: T) {
+    //     let mut entry_id = self.row_border[row].next;
+    //     let mut to_erase = vec![];
+    //     while let Some(entry) = self.entries.get_mut(entry_id) {
+    //         entry.value *= f.clone();
+    //         if entry.value == T::from(0) {
+    //             to_erase.push(entry_id);
+    //         }
+    //         entry_id = entry.adjacent_cols.next;
+    //     }
+    //     for id in to_erase {
+    //         self.erase(id);
+    //     }
+    // }
+
     /// Append a new row given an iterater that returns pairs of columns and
     /// values. The pairs must be sorted by columns.
     pub fn append_row(&mut self, entries: impl Iterator<Item = (usize, T)>) {
@@ -99,7 +118,7 @@ impl<T> SparseMatrix<T> {
     }
 }
 
-impl<T> SparseMatrix<T> {
+impl<T: Default> SparseMatrix<T> {
     fn prepend_in_row(&mut self, successor: Option<usize>, row: usize, col: usize, item: T) {
         let mut entry = Entry {
             value: item,
@@ -109,22 +128,13 @@ impl<T> SparseMatrix<T> {
             adjacent_rows: Default::default(),
         };
         let entry_id = self.entries.len();
-        let next_prev = if let Some(s) = successor {
-            entry.adjacent_rows.next = s;
-            &mut self.entries[s].adjacent_rows.prev
-        } else {
-            &mut self.row_border[row].prev
-        };
+        entry.adjacent_rows.next = if let Some(s) = successor { s } else { usize::MAX };
+        let next_prev = self.next_prev(RowColumn::Row, &entry);
         entry.adjacent_rows.prev = *next_prev;
         *next_prev = entry_id;
-        match self.entries.get_mut(entry.adjacent_rows.prev) {
-            Some(p) => {
-                p.adjacent_rows.next = entry_id;
-            }
-            None => {
-                self.row_border[row].next = entry_id;
-            }
-        }
+
+        *self.prev_next(RowColumn::Row, &entry) = entry_id;
+
         if col >= self.col_border.len() {
             self.col_border
                 .extend(iter::repeat(Default::default()).take(col + 1 - self.col_border.len()));
@@ -153,20 +163,79 @@ impl<T> SparseMatrix<T> {
             }
         }
         entry.adjacent_cols.next = next_in_col;
-        let next_prev = if let Some(next_entry) = self.entries.get_mut(next_in_col) {
-            &mut next_entry.adjacent_cols.prev
-        } else {
-            &mut self.col_border[col].prev
-        };
+        let next_prev = self.next_prev(RowColumn::Column, entry);
         entry.adjacent_cols.prev = *next_prev;
         *next_prev = entry_id;
 
-        match self.entries.get_mut(entry.adjacent_cols.prev) {
-            Some(p) => {
-                p.adjacent_cols.next = entry_id;
+        *self.prev_next(RowColumn::Column, entry) = entry_id;
+    }
+
+    // fn erase(&mut self, entry_id: usize) {
+    //     // TODO this does not deallocate the entry.
+    //     // We should maintain a queue of empty slots to
+    //     // re-use for the next allocation.
+    //     // At some point we should perform cleanup
+    //     // and swap entries in the vector
+    //     let entry = std::mem::take(&mut self.entries[entry_id]);
+    //     if let Some(p) = self.entries.get_mut(entry.adjacent_rows.prev) {
+    //         p.adjacent_rows.next = entry.adjacent_rows.next;
+    //     } else {
+    //         self.row_border[entry.row].next = entry.adjacent_rows.next;
+    //     }
+    //     // if (_e.prev_in_row)
+    //     //     _e.prev_in_row->next_in_row = _e.next_in_row;
+    //     // else
+    //     //     m_row_start[_e.row] = _e.next_in_row;
+    //     // if (_e.next_in_row)
+    //     //     _e.next_in_row->prev_in_row = _e.prev_in_row;
+    //     // else
+    //     //     m_row_end[_e.row] = _e.prev_in_row;
+    //     // if (_e.prev_in_col)
+    //     //     _e.prev_in_col->next_in_col = _e.next_in_col;
+    //     // else
+    //     //     m_col_start[_e.col] = _e.next_in_col;
+    //     // if (_e.next_in_col)
+    //     //     _e.next_in_col->prev_in_col = _e.prev_in_col;
+    //     // else
+    //     //     m_col_end[_e.col] = _e.prev_in_col;
+    // }
+
+    /// Returns the prev field of the next entry (or the border).
+    fn next_prev(&mut self, rc: RowColumn, entry: &Entry<T>) -> &mut usize {
+        match rc {
+            RowColumn::Row => {
+                if let Some(next_entry) = self.entries.get_mut(entry.adjacent_rows.next) {
+                    &mut next_entry.adjacent_rows.prev
+                } else {
+                    &mut self.row_border[entry.row].prev
+                }
             }
-            None => {
-                self.col_border[col].next = entry_id;
+            RowColumn::Column => {
+                if let Some(next_entry) = self.entries.get_mut(entry.adjacent_cols.next) {
+                    &mut next_entry.adjacent_cols.prev
+                } else {
+                    &mut self.col_border[entry.col].prev
+                }
+            }
+        }
+    }
+
+    /// Returns the next field of the prev entry (or the border).
+    fn prev_next(&mut self, rc: RowColumn, entry: &Entry<T>) -> &mut usize {
+        match rc {
+            RowColumn::Row => {
+                if let Some(prev_entry) = self.entries.get_mut(entry.adjacent_rows.prev) {
+                    &mut prev_entry.adjacent_rows.next
+                } else {
+                    &mut self.row_border[entry.row].next
+                }
+            }
+            RowColumn::Column => {
+                if let Some(prev_entry) = self.entries.get_mut(entry.adjacent_cols.prev) {
+                    &mut prev_entry.adjacent_cols.next
+                } else {
+                    &mut self.col_border[entry.col].next
+                }
             }
         }
     }
