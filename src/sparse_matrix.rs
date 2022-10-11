@@ -164,14 +164,8 @@ impl<T: Default> SparseMatrix<T> {
                 // TODO use "iterate_col"?
                 next_in_col = self.col_border[col].next;
                 // TODO could choose to search from end, depending on row.
-                loop {
-                    if let Some(e) = self.entries.get(next_in_col) {
-                        if e.row < entry.row {
-                            next_in_col = e.adjacent_cols.next;
-                            continue;
-                        }
-                    }
-                    break;
+                while let Some(e) = self.entries.get(next_in_col).filter(|e| e.row < entry.row) {
+                    next_in_col = e.adjacent_cols.next;
                 }
             }
         }
