@@ -5,8 +5,8 @@ use std::iter;
 #[derive(Default)]
 struct Entry<T> {
     value: T,
-    col: usize,
     row: usize,
+    col: usize,
     adjacent_cols: Neighbors,
     adjacent_rows: Neighbors,
 }
@@ -106,6 +106,37 @@ where
         }
     }
 
+    /// Ensures that the entry exists and returns a reference to its value.
+    pub fn entry(&mut self, row: usize, column: usize) -> &mut T {
+        self.ensure_size(row, column);
+
+        let mut id = usize::MAX;
+        // Try to find the entry or the one after it.
+        if let Some(last) = self.entries.get(self.row_border[row].prev) {
+            if column <= last.col {
+                id = self.row_border[row].next;
+                while let Some(e) = self.entries.get(id).filter(|e| e.col < column) {
+                    id = e.adjacent_cols.next;
+                }
+            }
+        }
+        // TODO reduce the entries array accesses here.
+        // The loop above might already hold the right index.
+        if id >= self.entries.len() || self.entries[id].col > column {
+            id = self.prepend_in_row(
+                if id < self.entries.len() {
+                    Some(id)
+                } else {
+                    None
+                },
+                row,
+                column,
+                Default::default(),
+            );
+        }
+        &mut self.entries[id].value
+    }
+
     /// Append a new row given an iterater that returns pairs of columns and
     /// values. The pairs must be sorted by columns.
     pub fn append_row(&mut self, entries: impl Iterator<Item = (usize, T)>) {
@@ -131,7 +162,13 @@ impl<T: Default> SparseMatrix<T> {
                 .extend(iter::repeat_with(Default::default).take(col + 1 - self.col_border.len()));
         }
     }
-    fn prepend_in_row(&mut self, successor: Option<usize>, row: usize, col: usize, value: T) {
+    fn prepend_in_row(
+        &mut self,
+        successor: Option<usize>,
+        row: usize,
+        col: usize,
+        value: T,
+    ) -> usize {
         let mut entry = Entry {
             value,
             col,
@@ -154,6 +191,7 @@ impl<T: Default> SparseMatrix<T> {
         self.ensure_size(0, col);
         self.adjust_column_properties(entry_id, &mut entry);
         self.entries[entry_id] = entry;
+        entry_id
     }
 
     fn adjust_column_properties(&mut self, entry_id: usize, entry: &mut Entry<T>) {
@@ -321,6 +359,60 @@ mod test {
         assert_eq!(
             matrix_by_column(&m),
             vec![vec![1], vec![4], vec![], vec![5, 2], vec![3], vec![6]]
+        );
+    }
+
+    #[test]
+    fn entry_access() {
+        let mut m = SparseMatrix::<i64>::new();
+        *m.entry(0, 0) = 1;
+        *m.entry(0, 4) = 2;
+        *m.entry(1, 4) = 3;
+        assert_eq!(matrix_by_row(&m), vec![vec![1, 2], vec![3]]);
+        assert_eq!(
+            matrix_by_column(&m),
+            vec![vec![1], vec![], vec![], vec![], vec![2, 3]]
+        );
+
+        *m.entry(0, 0) = 4;
+        *m.entry(1, 3) = 5;
+        *m.entry(1, 2) = 6;
+        assert_eq!(matrix_by_row(&m), vec![vec![4, 2], vec![6, 5, 3]]);
+        assert_eq!(
+            matrix_by_column(&m),
+            vec![vec![4], vec![], vec![6], vec![5], vec![2, 3]]
+        );
+
+        assert_eq!(*m.entry(0, 0), 4);
+        assert_eq!(*m.entry(1, 2), 6);
+        assert_eq!(*m.entry(1, 6), 0);
+        assert_eq!(*m.entry(9, 2), 0);
+        assert_eq!(
+            matrix_by_row(&m),
+            vec![
+                vec![4, 2],
+                vec![6, 5, 3, 0],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![0]
+            ]
+        );
+        assert_eq!(
+            matrix_by_column(&m),
+            vec![
+                vec![4],
+                vec![],
+                vec![6, 0],
+                vec![5],
+                vec![2, 3],
+                vec![],
+                vec![0]
+            ]
         );
     }
 }
