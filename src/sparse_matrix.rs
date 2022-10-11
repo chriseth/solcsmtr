@@ -11,7 +11,6 @@ struct Entry<T> {
     adjacent_rows: Neighbors,
 }
 
-#[derive(Clone)]
 struct Neighbors {
     prev: usize,
     next: usize,
@@ -31,7 +30,7 @@ pub struct SparseMatrix<T> {
     entries: Vec<Entry<T>>,
     col_border: Vec<Neighbors>,
     row_border: Vec<Neighbors>,
-    unused_indices: Vec<usize>,
+    abandoned_indices: Vec<usize>,
 }
 
 enum RowColumn {
@@ -61,14 +60,14 @@ impl<'a, T> Iterator for EntryIterator<'a, T> {
 
 impl<T> SparseMatrix<T>
 where
-    T: Default + Clone + std::ops::MulAssign + std::cmp::PartialEq + From<u32>,
+    T: Clone + Default + std::ops::MulAssign + std::cmp::PartialEq + From<u32>,
 {
     pub fn new() -> Self {
         Self {
             entries: vec![],
             col_border: vec![],
             row_border: vec![],
-            unused_indices: vec![]
+            abandoned_indices: vec![],
         }
     }
     pub fn rows(&self) -> usize {
@@ -121,6 +120,17 @@ where
 }
 
 impl<T: Default> SparseMatrix<T> {
+    /// Ensure that row and col exists.
+    fn ensure_size(&mut self, row: usize, col: usize) {
+        if row >= self.row_border.len() {
+            self.row_border
+                .extend(iter::repeat_with(Default::default).take(row + 1 - self.row_border.len()));
+        }
+        if col >= self.col_border.len() {
+            self.col_border
+                .extend(iter::repeat_with(Default::default).take(col + 1 - self.col_border.len()));
+        }
+    }
     fn prepend_in_row(&mut self, successor: Option<usize>, row: usize, col: usize, value: T) {
         let mut entry = Entry {
             value,
@@ -129,12 +139,11 @@ impl<T: Default> SparseMatrix<T> {
             adjacent_cols: Default::default(),
             adjacent_rows: Default::default(),
         };
-        let entry_id = self.entries.len();
-        entry.adjacent_rows.next = if let Some(s) = successor {
-            s
-        } else {
-            INVALID_INDEX
-        };
+        let entry_id = self.abandoned_indices.pop().unwrap_or_else(|| {
+            self.entries.push(Default::default());
+            self.entries.len() - 1
+        });
+        entry.adjacent_rows.next = successor.unwrap_or(INVALID_INDEX);
 
         let next_prev = self.next_prev(RowColumn::Row, &entry);
         entry.adjacent_rows.prev = *next_prev;
@@ -142,12 +151,9 @@ impl<T: Default> SparseMatrix<T> {
 
         *self.prev_next(RowColumn::Row, &entry) = entry_id;
 
-        if col >= self.col_border.len() {
-            self.col_border
-                .extend(iter::repeat(Default::default()).take(col + 1 - self.col_border.len()));
-        }
+        self.ensure_size(0, col);
         self.adjust_column_properties(entry_id, &mut entry);
-        self.entries.push(entry);
+        self.entries[entry_id] = entry;
     }
 
     fn adjust_column_properties(&mut self, entry_id: usize, entry: &mut Entry<T>) {
@@ -188,6 +194,7 @@ impl<T: Default> SparseMatrix<T> {
         *self.prev_next(RowColumn::Column, &entry) = entry.adjacent_cols.next;
         *self.next_prev(RowColumn::Row, &entry) = entry.adjacent_rows.prev;
         *self.next_prev(RowColumn::Column, &entry) = entry.adjacent_cols.prev;
+        self.abandoned_indices.push(entry_id);
     }
 
     /// Returns the prev field of the next entry (or the border).
@@ -302,9 +309,24 @@ mod test {
             matrix_by_column(&m),
             vec![vec![], vec![4], vec![5], vec![], vec![6]]
         );
+        assert_eq!(matrix_by_row(&m), vec![vec![], vec![4, 5, 6], vec![]]);
+    }
+
+    #[test]
+    fn reuse_abandoned() {
+        let mut m = SparseMatrix::<i64>::new();
+        m.append_row(vec![(0, 1), (3, 2), (4, 3)].into_iter());
+        m.append_row(vec![(1, 4), (3, 5), (5, 6)].into_iter());
+        m.multiply_row_by_factor(0, 0);
+        m.append_row(vec![(0, 1), (3, 2), (4, 3)].into_iter());
+        assert_eq!(m.entries.len(), 6);
         assert_eq!(
             matrix_by_row(&m),
-            vec![vec![], vec![4, 5, 6], vec![]]
+            vec![vec![], vec![4, 5, 6], vec![1, 2, 3]]
+        );
+        assert_eq!(
+            matrix_by_column(&m),
+            vec![vec![1], vec![4], vec![], vec![5, 2], vec![3], vec![6]]
         );
     }
 }
