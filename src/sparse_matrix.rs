@@ -7,8 +7,8 @@ struct Entry<T> {
     value: T,
     row: usize,
     col: usize,
-    adjacent_cols: Neighbors,
-    adjacent_rows: Neighbors,
+    in_col: Neighbors,
+    in_row: Neighbors,
 }
 
 struct Neighbors {
@@ -28,6 +28,8 @@ const INVALID_INDEX: usize = usize::MAX;
 
 pub struct SparseMatrix<T> {
     entries: Vec<Entry<T>>,
+    // TODO We could model the border using actual entries that then create a loop (i.e. turning the matrix into a torus).
+    // This could improve performance by removing conditional code.
     col_border: Vec<Neighbors>,
     row_border: Vec<Neighbors>,
     abandoned_indices: Vec<usize>,
@@ -45,22 +47,27 @@ struct EntryIterator<'a, T> {
 }
 
 impl<'a, T> Iterator for EntryIterator<'a, T> {
-    type Item = &'a Entry<T>;
+    type Item = (usize, usize, &'a T);
     fn next(&mut self) -> Option<Self::Item> {
         let n = self.entries.get(self.index);
         if let Some(entry) = n {
             self.index = match self.kind {
-                RowColumn::Row => entry.adjacent_rows.next,
-                RowColumn::Column => entry.adjacent_cols.next,
+                RowColumn::Row => entry.in_row.next,
+                RowColumn::Column => entry.in_col.next,
             };
         }
-        n
+        n.map(|e| (e.row, e.col, &e.value))
     }
 }
 
 impl<T> SparseMatrix<T>
 where
-    T: Clone + Default + std::ops::MulAssign + std::cmp::PartialEq + From<u32>,
+    T: Clone
+        + Default
+        + std::ops::MulAssign
+        + std::ops::Mul<T, Output = T>
+        + std::ops::AddAssign
+        + std::cmp::PartialEq,
 {
     pub fn new() -> Self {
         Self {
@@ -96,13 +103,38 @@ where
         let mut to_erase = vec![];
         while let Some(entry) = self.entries.get_mut(entry_id) {
             entry.value *= f.clone();
-            if entry.value == T::from(0) {
+            if entry.value == Default::default() {
                 to_erase.push(entry_id);
             }
-            entry_id = entry.adjacent_rows.next;
+            entry_id = entry.in_row.next;
         }
         for id in to_erase {
             self.erase(id);
+        }
+    }
+
+    pub fn add_multiple_of_row(&mut self, source_row: usize, target_row: usize, factor: T) {
+        let multiple = self
+            .iterate_row(source_row)
+            .map(|(_, c, v)| (c, v.clone() * factor.clone()))
+            .filter(|(_, v)| *v != Default::default())
+            .collect::<Vec<_>>();
+        let mut target = self.row_border[target_row].next;
+        for (col, sv) in multiple {
+            while let Some(e) = self.entries.get(target).filter(|e| e.col < col) {
+                target = e.in_row.next;
+            }
+            target = match self.entries.get_mut(target) {
+                Some(e) if e.col == col => {
+                    e.value += sv.clone();
+                    let next = e.in_row.next;
+                    if e.value == Default::default() {
+                        self.erase(target)
+                    }
+                    next
+                }
+                _ => self.prepend_in_row(target, target_row, col, sv),
+            }
         }
     }
 
@@ -116,23 +148,14 @@ where
             if column <= last.col {
                 id = self.row_border[row].next;
                 while let Some(e) = self.entries.get(id).filter(|e| e.col < column) {
-                    id = e.adjacent_cols.next;
+                    id = e.in_col.next;
                 }
             }
         }
         // TODO reduce the entries array accesses here.
         // The loop above might already hold the right index.
         if id >= self.entries.len() || self.entries[id].col > column {
-            id = self.prepend_in_row(
-                if id < self.entries.len() {
-                    Some(id)
-                } else {
-                    None
-                },
-                row,
-                column,
-                Default::default(),
-            );
+            id = self.prepend_in_row(id, row, column, Default::default());
         }
         &mut self.entries[id].value
     }
@@ -143,8 +166,8 @@ where
         let row = self.rows();
         self.row_border.push(Default::default());
         for (col, value) in entries {
-            if value != T::from(0) {
-                self.prepend_in_row(None, row, col, value);
+            if value != Default::default() {
+                self.prepend_in_row(INVALID_INDEX, row, col, value);
             }
         }
     }
@@ -162,28 +185,22 @@ impl<T: Default> SparseMatrix<T> {
                 .extend(iter::repeat_with(Default::default).take(col + 1 - self.col_border.len()));
         }
     }
-    fn prepend_in_row(
-        &mut self,
-        successor: Option<usize>,
-        row: usize,
-        col: usize,
-        value: T,
-    ) -> usize {
+    fn prepend_in_row(&mut self, successor: usize, row: usize, col: usize, value: T) -> usize {
         let mut entry = Entry {
             value,
             col,
             row,
-            adjacent_cols: Default::default(),
-            adjacent_rows: Default::default(),
+            in_col: Default::default(),
+            in_row: Default::default(),
         };
         let entry_id = self.abandoned_indices.pop().unwrap_or_else(|| {
             self.entries.push(Default::default());
             self.entries.len() - 1
         });
-        entry.adjacent_rows.next = successor.unwrap_or(INVALID_INDEX);
+        entry.in_row.next = successor;
 
         let next_prev = self.next_prev(RowColumn::Row, &entry);
-        entry.adjacent_rows.prev = *next_prev;
+        entry.in_row.prev = *next_prev;
         *next_prev = entry_id;
 
         *self.prev_next(RowColumn::Row, &entry) = entry_id;
@@ -203,13 +220,13 @@ impl<T: Default> SparseMatrix<T> {
                 next_in_col = self.col_border[col].next;
                 // TODO could choose to search from end, depending on row.
                 while let Some(e) = self.entries.get(next_in_col).filter(|e| e.row < entry.row) {
-                    next_in_col = e.adjacent_cols.next;
+                    next_in_col = e.in_col.next;
                 }
             }
         }
-        entry.adjacent_cols.next = next_in_col;
+        entry.in_col.next = next_in_col;
         let next_prev = self.next_prev(RowColumn::Column, entry);
-        entry.adjacent_cols.prev = *next_prev;
+        entry.in_col.prev = *next_prev;
         *next_prev = entry_id;
 
         *self.prev_next(RowColumn::Column, entry) = entry_id;
@@ -222,10 +239,10 @@ impl<T: Default> SparseMatrix<T> {
         // At some point we should perform cleanup
         // and swap entries in the vector
         let entry = std::mem::take(&mut self.entries[entry_id]);
-        *self.prev_next(RowColumn::Row, &entry) = entry.adjacent_rows.next;
-        *self.prev_next(RowColumn::Column, &entry) = entry.adjacent_cols.next;
-        *self.next_prev(RowColumn::Row, &entry) = entry.adjacent_rows.prev;
-        *self.next_prev(RowColumn::Column, &entry) = entry.adjacent_cols.prev;
+        *self.prev_next(RowColumn::Row, &entry) = entry.in_row.next;
+        *self.prev_next(RowColumn::Column, &entry) = entry.in_col.next;
+        *self.next_prev(RowColumn::Row, &entry) = entry.in_row.prev;
+        *self.next_prev(RowColumn::Column, &entry) = entry.in_col.prev;
         self.abandoned_indices.push(entry_id);
     }
 
@@ -233,15 +250,15 @@ impl<T: Default> SparseMatrix<T> {
     fn next_prev(&mut self, rc: RowColumn, entry: &Entry<T>) -> &mut usize {
         match rc {
             RowColumn::Row => {
-                if let Some(next_entry) = self.entries.get_mut(entry.adjacent_rows.next) {
-                    &mut next_entry.adjacent_rows.prev
+                if let Some(next_entry) = self.entries.get_mut(entry.in_row.next) {
+                    &mut next_entry.in_row.prev
                 } else {
                     &mut self.row_border[entry.row].prev
                 }
             }
             RowColumn::Column => {
-                if let Some(next_entry) = self.entries.get_mut(entry.adjacent_cols.next) {
-                    &mut next_entry.adjacent_cols.prev
+                if let Some(next_entry) = self.entries.get_mut(entry.in_col.next) {
+                    &mut next_entry.in_col.prev
                 } else {
                     &mut self.col_border[entry.col].prev
                 }
@@ -253,15 +270,15 @@ impl<T: Default> SparseMatrix<T> {
     fn prev_next(&mut self, rc: RowColumn, entry: &Entry<T>) -> &mut usize {
         match rc {
             RowColumn::Row => {
-                if let Some(prev_entry) = self.entries.get_mut(entry.adjacent_rows.prev) {
-                    &mut prev_entry.adjacent_rows.next
+                if let Some(prev_entry) = self.entries.get_mut(entry.in_row.prev) {
+                    &mut prev_entry.in_row.next
                 } else {
                     &mut self.row_border[entry.row].next
                 }
             }
             RowColumn::Column => {
-                if let Some(prev_entry) = self.entries.get_mut(entry.adjacent_cols.prev) {
-                    &mut prev_entry.adjacent_cols.next
+                if let Some(prev_entry) = self.entries.get_mut(entry.in_col.prev) {
+                    &mut prev_entry.in_col.next
                 } else {
                     &mut self.col_border[entry.col].next
                 }
@@ -276,13 +293,13 @@ mod test {
 
     fn matrix_by_row(m: &SparseMatrix<i64>) -> Vec<Vec<i64>> {
         (0..m.rows())
-            .map(|c| m.iterate_row(c).map(|e| e.value).collect::<Vec<_>>())
+            .map(|c| m.iterate_row(c).map(|(.., v)| *v).collect::<Vec<_>>())
             .collect::<Vec<_>>()
     }
 
     fn matrix_by_column(m: &SparseMatrix<i64>) -> Vec<Vec<i64>> {
         (0..m.columns())
-            .map(|c| m.iterate_column(c).map(|e| e.value).collect::<Vec<_>>())
+            .map(|c| m.iterate_column(c).map(|(.., v)| *v).collect::<Vec<_>>())
             .collect::<Vec<_>>()
     }
 
@@ -315,10 +332,7 @@ mod test {
             matrix_by_column(&m),
             vec![vec![1], vec![4], vec![], vec![2, 5], vec![3], vec![6]]
         );
-        assert_eq!(
-            m.iterate_row(0).map(|e| e.value).collect::<Vec<_>>(),
-            vec![1, 2, 3]
-        );
+        assert_eq!(matrix_by_row(&m), vec![vec![1, 2, 3], vec![4, 5, 6]]);
     }
 
     #[test]
@@ -412,6 +426,27 @@ mod test {
                 vec![2, 3],
                 vec![],
                 vec![0]
+            ]
+        );
+    }
+
+    #[test]
+    fn add_multiple() {
+        let mut m = SparseMatrix::<i64>::new();
+        m.append_row(vec![(0, 1), (3, 2), (5, 3), (6, 1)].into_iter());
+        m.append_row(vec![(1, 4), (3, -4), (5, 6)].into_iter());
+        m.add_multiple_of_row(0, 1, 2);
+        assert_eq!(matrix_by_row(&m), vec![vec![1, 2, 3, 1], vec![2, 4, 12, 2]]);
+        assert_eq!(
+            matrix_by_column(&m),
+            vec![
+                vec![1, 2],
+                vec![4],
+                vec![],
+                vec![2],
+                vec![],
+                vec![3, 12],
+                vec![1, 2]
             ]
         );
     }
