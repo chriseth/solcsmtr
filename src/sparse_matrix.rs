@@ -1,5 +1,7 @@
 use std::iter;
 
+use num_traits::Zero;
+
 // TODO try u32 for index.
 
 #[derive(Default)]
@@ -41,7 +43,7 @@ enum RowColumn {
     Column,
 }
 
-struct EntryIterator<'a, T> {
+pub struct EntryIterator<'a, T> {
     index: usize,
     entries: &'a Vec<Entry<T>>,
     kind: RowColumn,
@@ -68,6 +70,7 @@ where
         + std::ops::MulAssign
         + std::ops::Mul<T, Output = T>
         + std::ops::AddAssign
+        + num_traits::Zero
         + std::cmp::PartialEq,
 {
     pub fn new() -> Self {
@@ -84,14 +87,14 @@ where
     pub fn columns(&self) -> usize {
         self.col_border.len()
     }
-    fn iterate_row(&self, row: usize) -> EntryIterator<T> {
+    pub fn iterate_row(&self, row: usize) -> EntryIterator<T> {
         EntryIterator {
             index: self.row_border.get(row).unwrap_or(&Default::default()).next,
             entries: &self.entries,
             kind: RowColumn::Row,
         }
     }
-    fn iterate_column(&self, col: usize) -> EntryIterator<T> {
+    pub fn iterate_column(&self, col: usize) -> EntryIterator<T> {
         EntryIterator {
             index: self.col_border.get(col).unwrap_or(&Default::default()).next,
             entries: &self.entries,
@@ -104,7 +107,7 @@ where
         let mut to_erase = vec![];
         while let Some(entry) = self.entries.get_mut(entry_id) {
             entry.value *= f.clone();
-            if entry.value == Default::default() {
+            if entry.value.is_zero() {
                 to_erase.push(entry_id);
             }
             entry_id = entry.in_row.next;
@@ -118,7 +121,7 @@ where
         let multiple = self
             .iterate_row(source_row)
             .map(|(_, c, v)| (c, v.clone() * factor.clone()))
-            .filter(|(_, v)| *v != Default::default())
+            .filter(|(_, v)| !v.is_zero())
             .collect::<Vec<_>>();
         let mut target = self.row_border[target_row].next;
         for (col, sv) in multiple {
@@ -129,7 +132,7 @@ where
                 Some(e) if e.col == col => {
                     e.value += sv.clone();
                     let next = e.in_row.next;
-                    if e.value == Default::default() {
+                    if e.value.is_zero() {
                         self.erase(target)
                     }
                     next
@@ -167,7 +170,7 @@ where
         let row = self.rows();
         self.row_border.push(Default::default());
         for (col, value) in entries {
-            if value != Default::default() {
+            if !value.is_zero() {
                 self.prepend_in_row(INVALID_INDEX, row, col, value);
             }
         }

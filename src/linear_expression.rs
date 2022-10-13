@@ -3,7 +3,7 @@ use std::ops::{Add, Mul, Sub};
 
 use num_rational::BigRational;
 use num_traits::identities::One;
-use num_traits::FromPrimitive;
+use num_traits::{FromPrimitive, Zero};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LinearExpression(Vec<(usize, BigRational)>);
@@ -23,7 +23,7 @@ impl Mul<LinearExpression> for i32 {
             rhs.0
                 .iter()
                 .map(|(i, v)| (*i, v * BigRational::from_i32(self).unwrap()))
-                .filter(|(_, x)| *x != BigRational::default())
+                .filter(|(_, x)| !x.is_zero())
                 .collect::<Vec<_>>(),
         )
     }
@@ -40,11 +40,7 @@ impl Add for LinearExpression {
                 .and_modify(|x| *x = x.clone() + y.clone())
                 .or_insert(y);
         }
-        LinearExpression(
-            data.into_iter()
-                .filter(|(_, x)| *x != BigRational::default())
-                .collect(),
-        )
+        LinearExpression(data.into_iter().filter(|(_, x)| !x.is_zero()).collect())
     }
 }
 
@@ -59,11 +55,7 @@ impl Sub for LinearExpression {
                 .and_modify(|x| *x = x.clone() - y.clone())
                 .or_insert(y);
         }
-        LinearExpression(
-            data.into_iter()
-                .filter(|(_, x)| *x != BigRational::default())
-                .collect(),
-        )
+        LinearExpression(data.into_iter().filter(|(_, x)| !x.is_zero()).collect())
     }
 }
 

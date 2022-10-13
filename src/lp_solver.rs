@@ -3,7 +3,8 @@ use std::{
     collections::HashMap,
 };
 
-use num_rational::BigRational;
+use num_rational::{BigRational, Ratio};
+use num_traits::Signed;
 
 use crate::{sparse_matrix::SparseMatrix, types::*};
 
@@ -13,6 +14,9 @@ type Number = BigRational;
 pub struct LPSolver {
     tableau: SparseMatrix<Number>,
     variables: Vec<Variable>,
+    /// Mapping from variable id to row it controls.
+    basic_variables: HashMap<usize, usize>,
+    basic_variable_for_row: Vec<usize>,
     /// Maps outer variable IDs to inner variable IDs.
     var_mapping: HashMap<usize, usize>,
     feasible: Option<bool>,
@@ -41,6 +45,16 @@ impl Variable {
             .filter(|b| self.value < **b)
             .is_some()
     }
+    /// Updates the variable to be within bounds and returns the difference
+    pub fn update(&mut self) -> Option<RationalWithDelta> {
+        let v = match &self.bounds {
+            Bounds { lower: Some(l), .. } if self.value < *l => l.clone(),
+            Bounds { upper: Some(u), .. } if self.value > *u => u.clone(),
+            _ => return None,
+        };
+        let old = std::mem::replace(&mut self.value, v.clone());
+        Some(v - old)
+    }
 }
 
 #[derive(Default)]
@@ -52,6 +66,13 @@ pub struct Bounds {
 impl Bounds {
     pub fn combine(&mut self, other: Bounds) {
         *self = combine_bounds(std::mem::take(self), other);
+    }
+    pub fn are_conflicting(&self) -> bool {
+        if let (Some(l), Some(u)) = (&self.lower, &self.upper) {
+            l > u
+        } else {
+            false
+        }
     }
 }
 
@@ -83,21 +104,12 @@ impl LPSolver {
         if !self.correct_nonbasic() {
             return Some(false);
         }
-        while let Some(cbv) = self.first_conflicting_basic_variable() {
+        while let Some((cbv, diff)) = self.first_conflicting_basic_variable() {
             let var = &self.variables[cbv];
-            if var.violates_lower_bound() {
-                if let Some(replacement) = self.first_replacement_var(cbv, true) {
-                    self.pivot_and_update(cbv, var.bounds.lower.clone().unwrap(), replacement);
-                } else {
-                    return Some(false);
-                }
+            if let Some(replacement) = self.first_replacement_var(cbv, diff.is_positive()) {
+                self.pivot_and_update(cbv, diff, replacement);
             } else {
-                assert!(var.violates_upper_bound());
-                if let Some(replacement) = self.first_replacement_var(cbv, false) {
-                    self.pivot_and_update(cbv, var.bounds.upper.clone().unwrap(), replacement);
-                } else {
-                    return Some(false);
-                }
+                return Some(false);
             }
         }
         Some(true)
@@ -112,9 +124,34 @@ impl LPSolver {
         })
     }
     fn correct_nonbasic(&mut self) -> bool {
+        // TODO mark "dirty" nonbasic variables at the point where they are modified.
+        // TODO could we actually split basic and non-basic variables
+        // into two vectors?
+        for id in 0..self.variables.len() {
+            let v = &mut self.variables[id];
+            if v.bounds.are_conflicting() {
+                return false;
+            }
+            if self.basic_variables.contains_key(&id) {
+                continue;
+            }
+            if let Some(diff) = v.update() {
+                for (row, _, factor) in self.tableau.iterate_column(id) {
+                    let bv = self.basic_variable_for_row[row];
+                    self.variables[bv].value += diff.clone() * factor.clone();
+                }
+            }
+        }
         true
     }
-    fn first_conflicting_basic_variable(&self) -> Option<usize> {
+    /// Finds the first conflicting basic variable, updates it and returns its ID and
+    /// difference after the update.
+    fn first_conflicting_basic_variable(&mut self) -> Option<(usize, RationalWithDelta)> {
+        for id in &self.basic_variable_for_row {
+            if let Some(diff) = self.variables[*id].update() {
+                return Some((*id, diff));
+            }
+        }
         None
     }
     fn first_replacement_var(&self, basic: usize, increasing: bool) -> Option<usize> {
@@ -123,7 +160,7 @@ impl LPSolver {
     fn pivot_and_update(
         &mut self,
         old_basic: usize,
-        new_value: RationalWithDelta,
+        value_diff: RationalWithDelta,
         new_basic: usize,
     ) {
     }
