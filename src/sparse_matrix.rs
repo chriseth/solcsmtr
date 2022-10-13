@@ -151,7 +151,7 @@ where
             if column <= last.col {
                 id = self.row_border[row].next;
                 while let Some(e) = self.entries.get(id).filter(|e| e.col < column) {
-                    id = e.in_col.next;
+                    id = e.in_row.next;
                 }
             }
         }
