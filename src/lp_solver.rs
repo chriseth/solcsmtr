@@ -9,9 +9,9 @@ use crate::{sparse_matrix::SparseMatrix, types::*};
 
 type Number = BigRational;
 
+#[derive(Default)]
 pub struct LPSolver {
     tableau: SparseMatrix<Number>,
-
     variables: Vec<Variable>,
     /// Maps outer variable IDs to inner variable IDs.
     var_mapping: HashMap<usize, usize>,
@@ -56,10 +56,11 @@ impl Bounds {
 }
 
 impl LPSolver {
-    pub fn append_row(&mut self, outer_id: usize, data: impl Iterator<Item = (usize, Number)>) {
+    pub fn append_row(&mut self, outer_id: usize, data: impl IntoIterator<Item = (usize, Number)>) {
         self.feasible = None;
         // TODO do this without copying - maybe separate variables into their own sub-structure?
         let data = data
+            .into_iter()
             .map(|(outer_id, v)| (self.add_outer_variable(outer_id), v))
             .collect::<Vec<_>>();
         self.tableau.append_row(data.into_iter());
@@ -152,5 +153,41 @@ fn combine_upper(
     match (a, b) {
         (Some(x), Some(y)) => Some(min(x, y)),
         (a, b) => a.and(b),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::linear_expression::SymbolicVariableGenerator;
+
+    use super::*;
+    #[test]
+    fn empty() {
+        let mut solver = LPSolver::default();
+        assert_eq!(solver.feasible(), Some(true));
+    }
+    #[test]
+    fn simple() {
+        let mut solver = LPSolver::default();
+        let mut g = SymbolicVariableGenerator::default();
+        let x = g.var("x");
+        let y = g.var("y");
+        let t = g.var("_t");
+        solver.append_row(g.id("_t"), 2 * x + y);
+        solver.restrict_bounds(
+            g.id("x"),
+            Bounds {
+                lower: Some(to_rat(2).into()),
+                upper: None,
+            },
+        );
+        assert_eq!(solver.feasible, Some(true));
+        solver.restrict_bounds(
+            g.id("y"),
+            Bounds {
+                lower: None,
+                upper: Some((-to_rat(20)).into()),
+            },
+        );
     }
 }

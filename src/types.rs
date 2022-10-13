@@ -1,5 +1,10 @@
+use num_bigint::BigInt;
 use num_rational::BigRational;
 use std::ops::{Add, Mul, Sub};
+
+pub fn to_rat(x: i32) -> BigRational {
+    BigRational::from_integer(BigInt::from(x))
+}
 
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RationalWithDelta {

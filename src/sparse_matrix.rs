@@ -26,6 +26,7 @@ impl Default for Neighbors {
 
 const INVALID_INDEX: usize = usize::MAX;
 
+#[derive(Default)]
 pub struct SparseMatrix<T> {
     entries: Vec<Entry<T>>,
     // TODO We could model the border using actual entries that then create a loop (i.e. turning the matrix into a torus).

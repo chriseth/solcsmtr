@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Add, Mul, Sub};
 
 use num_rational::BigRational;
@@ -69,15 +69,20 @@ impl Sub for LinearExpression {
 
 #[derive(Default)]
 pub struct SymbolicVariableGenerator {
-    names: Vec<String>,
+    id_to_name: Vec<String>,
+    name_to_id: HashMap<String, usize>,
 }
 
 impl SymbolicVariableGenerator {
     pub fn var(&mut self, name: &str) -> LinearExpression {
-        let id = self.names.len();
-        self.names.push(name.to_string());
-
-        LinearExpression(vec![(id, One::one())])
+        LinearExpression(vec![(self.id(name), One::one())])
+    }
+    pub fn id(&mut self, name: &str) -> usize {
+        *self.name_to_id.entry(name.to_string()).or_insert_with(|| {
+            let id = self.id_to_name.len();
+            self.id_to_name.push(name.to_string());
+            id
+        })
     }
 }
 
@@ -86,10 +91,11 @@ mod test {
     use super::*;
 
     #[test]
-    fn add_linear_expression() {
+    fn simple() {
         let mut g = SymbolicVariableGenerator::default();
         let x = g.var("x");
         let y = g.var("y");
+
         assert_eq!(x.clone() + x.clone(), 2 * x.clone());
         assert_eq!(0 * x.clone(), Default::default());
         assert_eq!(x.clone() - x.clone(), Default::default());
