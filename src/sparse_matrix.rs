@@ -70,8 +70,7 @@ where
         + std::ops::MulAssign
         + std::ops::Mul<T, Output = T>
         + std::ops::AddAssign
-        + num_traits::Zero
-        + std::cmp::PartialEq,
+        + num_traits::Zero,
 {
     pub fn new() -> Self {
         Self {

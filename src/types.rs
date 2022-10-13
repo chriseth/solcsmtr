@@ -1,7 +1,7 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{Num, Signed, Zero};
-use std::ops::{Add, AddAssign, Mul, Sub};
+use std::{ops::{Add, AddAssign, Div, Mul, Sub}, fmt::{Display, self}};
 
 pub fn to_rat(x: i32) -> BigRational {
     BigRational::from_integer(BigInt::from(x))
@@ -74,6 +74,27 @@ impl Mul<BigRational> for RationalWithDelta {
         Self {
             value: self.value * rhs.clone(),
             delta: self.delta * rhs,
+        }
+    }
+}
+
+impl Div<BigRational> for RationalWithDelta {
+    type Output = Self;
+
+    fn div(self, rhs: BigRational) -> Self::Output {
+        Self {
+            value: self.value / rhs.clone(),
+            delta: self.delta / rhs,
+        }
+    }
+}
+
+impl Display for RationalWithDelta {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.delta.is_zero() {
+            write!(f, "{}", self.value)
+        } else {
+            write!(f, "{} + {}d", self.value, self.delta)
         }
     }
 }

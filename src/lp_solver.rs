@@ -1,10 +1,10 @@
 use std::{
     cmp::{max, min},
-    collections::HashMap,
+    collections::HashMap, fmt::{Display, self},
 };
 
 use num_rational::{BigRational, Ratio};
-use num_traits::Signed;
+use num_traits::{One, Signed, Zero};
 
 use crate::{sparse_matrix::SparseMatrix, types::*};
 
@@ -57,6 +57,23 @@ impl Variable {
     }
 }
 
+impl Display for Variable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(l) = self.bounds.lower {
+            write!(f, "{:>8} <= ", l)?
+        } else {
+            write!(f, "{:8} <= ", "")?
+        }
+        if cfg!(debug) {
+        write!(f, "{:4}", self.name)?
+        } else {
+
+        write!(f, "{:4}", "")?
+        }
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 pub struct Bounds {
     pub lower: Option<RationalWithDelta>,
@@ -79,12 +96,16 @@ impl Bounds {
 impl LPSolver {
     pub fn append_row(&mut self, outer_id: usize, data: impl IntoIterator<Item = (usize, Number)>) {
         self.feasible = None;
+        let basic_id = self.add_outer_variable(outer_id);
         // TODO do this without copying - maybe separate variables into their own sub-structure?
         let data = data
             .into_iter()
             .map(|(outer_id, v)| (self.add_outer_variable(outer_id), v))
             .collect::<Vec<_>>();
         self.tableau.append_row(data.into_iter());
+        self.basic_variable_for_row.push(basic_id);
+        self.basic_variable_for_row
+            .insert(self.tableau.rows() - 1, basic_id);
     }
     pub fn restrict_bounds(&mut self, outer_id: usize, bounds: Bounds) {
         self.feasible = None;
@@ -113,6 +134,15 @@ impl LPSolver {
             }
         }
         Some(true)
+    }
+}
+
+impl Display for LPSolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for v in &self.variables {
+            write!(f, "{}", v)?
+        }
+        Ok(())
     }
 }
 
@@ -155,14 +185,62 @@ impl LPSolver {
         None
     }
     fn first_replacement_var(&self, basic: usize, increasing: bool) -> Option<usize> {
+        for (_, column, factor) in self.tableau.iterate_row(self.basic_variables[&basic]) {
+            if column == basic {
+                continue;
+            }
+            assert!(!factor.is_zero());
+            let check_upper = factor.is_negative() ^ increasing;
+            if check_upper && self.variables[column].violates_upper_bound() {
+                return Some(column);
+            } else if self.variables[column].violates_lower_bound() {
+                return Some(column);
+            }
+        }
         None
     }
+    // TODO actually does this updatE?
     fn pivot_and_update(
         &mut self,
         old_basic: usize,
         value_diff: RationalWithDelta,
         new_basic: usize,
     ) {
+        let old_row = self.basic_variables[&old_basic];
+        let theta = value_diff / self.tableau.entry(old_row, new_basic).clone();
+        self.variables[new_basic].value += theta.clone();
+        // TODO combine this with the iteration in `correct_nonbasic`.
+        // Maybe even combine it with the update() call.
+        for (row, _, factor) in self.tableau.iterate_column(new_basic) {
+            let i = self.basic_variable_for_row[row];
+            if i != old_basic {
+                self.variables[i].value += theta.clone() * factor.clone();
+            }
+        }
+        self.pivot(old_basic, new_basic);
+    }
+
+    fn pivot(&mut self, old_basic: usize, new_basic: usize) {
+        let pivot_row = self.basic_variables[&old_basic];
+        let pivot = self.tableau.entry(pivot_row, new_basic).clone();
+        assert!(!pivot.is_zero());
+        if pivot != -BigRational::one() {
+            self.tableau
+                .multiply_row_by_factor(pivot_row, -pivot.recip());
+        }
+        let factors = self
+            .tableau
+            .iterate_column(new_basic)
+            .map(|(row, _, f)| (row, f.clone()))
+            .collect::<Vec<_>>();
+        for (row, factor) in factors {
+            if row != pivot_row {
+                self.tableau.add_multiple_of_row(pivot_row, row, factor);
+            }
+        }
+        self.basic_variables.remove_entry(&old_basic);
+        self.basic_variables.insert(new_basic, pivot_row);
+        self.basic_variable_for_row[pivot_row] = new_basic;
     }
 }
 
