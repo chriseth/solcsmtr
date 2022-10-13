@@ -5,6 +5,8 @@ use num_rational::BigRational;
 use num_traits::identities::One;
 use num_traits::{FromPrimitive, Zero};
 
+use crate::lp_solver::LPSolver;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LinearExpression(Vec<(usize, BigRational)>);
 
@@ -75,6 +77,11 @@ impl SymbolicVariableGenerator {
             self.id_to_name.push(name.to_string());
             id
         })
+    }
+    pub fn transfer_names(&self, solver: &mut LPSolver) {
+        for (id, name) in self.id_to_name.iter().enumerate() {
+            solver.set_variable_name(id, name.clone());
+        }
     }
 }
 

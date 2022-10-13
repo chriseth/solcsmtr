@@ -1,7 +1,10 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::{Num, Signed, Zero};
-use std::{ops::{Add, AddAssign, Div, Mul, Sub}, fmt::{Display, self}};
+use std::{
+    fmt::{self, Display},
+    ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
+};
 
 pub fn to_rat(x: i32) -> BigRational {
     BigRational::from_integer(BigInt::from(x))
@@ -65,6 +68,12 @@ impl Sub for RationalWithDelta {
             value: self.value - rhs.value,
             delta: self.delta - rhs.delta,
         }
+    }
+}
+impl SubAssign for RationalWithDelta {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.value -= rhs.value;
+        self.delta -= rhs.delta;
     }
 }
 

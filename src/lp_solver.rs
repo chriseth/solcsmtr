@@ -1,6 +1,7 @@
 use std::{
     cmp::{max, min},
-    collections::HashMap, fmt::{Display, self},
+    collections::HashMap,
+    fmt::{self, Display},
 };
 
 use num_rational::{BigRational, Ratio};
@@ -15,7 +16,7 @@ pub struct LPSolver {
     tableau: SparseMatrix<Number>,
     variables: Vec<Variable>,
     /// Mapping from variable id to row it controls.
-    basic_variables: HashMap<usize, usize>,
+    basic_variable_to_row: HashMap<usize, usize>,
     basic_variable_for_row: Vec<usize>,
     /// Maps outer variable IDs to inner variable IDs.
     var_mapping: HashMap<usize, usize>,
@@ -26,24 +27,24 @@ pub struct LPSolver {
 struct Variable {
     value: RationalWithDelta,
     bounds: Bounds,
-    #[cfg(Debug)]
+    #[cfg(debug_assertions)]
     name: String,
 }
 
 impl Variable {
-    pub fn violates_upper_bound(&self) -> bool {
-        self.bounds
-            .upper
-            .as_ref()
-            .filter(|b| self.value > **b)
-            .is_some()
+    pub fn can_be_increased(&self) -> bool {
+        if let Some(u) = &self.bounds.upper {
+            self.value < *u
+        } else {
+            true
+        }
     }
-    pub fn violates_lower_bound(&self) -> bool {
-        self.bounds
-            .lower
-            .as_ref()
-            .filter(|b| self.value < **b)
-            .is_some()
+    pub fn can_be_decreased(&self) -> bool {
+        if let Some(l) = &self.bounds.lower {
+            self.value > *l
+        } else {
+            true
+        }
     }
     /// Updates the variable to be within bounds and returns the difference
     pub fn update(&mut self) -> Option<RationalWithDelta> {
@@ -55,22 +56,33 @@ impl Variable {
         let old = std::mem::replace(&mut self.value, v.clone());
         Some(v - old)
     }
+    pub fn name(&self) -> String {
+        #[cfg(debug_assertions)]
+        {
+            self.name.clone()
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            // TODO at some point, use the IDs
+            String::new()
+        }
+    }
 }
 
 impl Display for Variable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(l) = self.bounds.lower {
-            write!(f, "{:>8} <= ", l)?
+        if let Some(l) = &self.bounds.lower {
+            write!(f, "{:>8} <= ", format!("{}", l))?
         } else {
-            write!(f, "{:8} <= ", "")?
+            write!(f, "{:8}    ", "")?
         }
-        if cfg!(debug) {
-        write!(f, "{:4}", self.name)?
+        write!(f, "{:^4}", self.name())?;
+        if let Some(u) = &self.bounds.upper {
+            write!(f, "<= {:<8}", format!("{}", u))?
         } else {
-
-        write!(f, "{:4}", "")?
+            write!(f, "   {:8}", "")?
         }
-        Ok(())
+        write!(f, ":= {}", self.value)
     }
 }
 
@@ -94,6 +106,8 @@ impl Bounds {
 }
 
 impl LPSolver {
+    /// Appends a row represented by the variable `outer_id`. The row must not have any
+    /// factor corresponding to that variable.
     pub fn append_row(&mut self, outer_id: usize, data: impl IntoIterator<Item = (usize, Number)>) {
         self.feasible = None;
         let basic_id = self.add_outer_variable(outer_id);
@@ -102,17 +116,18 @@ impl LPSolver {
             .into_iter()
             .map(|(outer_id, v)| (self.add_outer_variable(outer_id), v))
             .collect::<Vec<_>>();
+        let row = self.tableau.rows();
         self.tableau.append_row(data.into_iter());
+        *self.tableau.entry(row, basic_id) = -BigRational::one();
         self.basic_variable_for_row.push(basic_id);
-        self.basic_variable_for_row
-            .insert(self.tableau.rows() - 1, basic_id);
+        self.basic_variable_to_row.insert(basic_id, row);
     }
     pub fn restrict_bounds(&mut self, outer_id: usize, bounds: Bounds) {
         self.feasible = None;
         let var_id = self.add_outer_variable(outer_id);
         self.variables[var_id].bounds.combine(bounds);
     }
-    #[cfg(Debug)]
+    #[cfg(debug_assertions)]
     pub fn set_variable_name(&mut self, outer_id: usize, name: String) {
         let var_id = self.add_outer_variable(outer_id);
         self.variables[var_id].name = name;
@@ -130,9 +145,13 @@ impl LPSolver {
             if let Some(replacement) = self.first_replacement_var(cbv, diff.is_positive()) {
                 self.pivot_and_update(cbv, diff, replacement);
             } else {
+                // Undo correction of basic vaiable.
+                self.variables[cbv].value -= diff;
+                self.feasible = Some(false);
                 return Some(false);
             }
         }
+        self.feasible = Some(true);
         Some(true)
     }
 }
@@ -140,7 +159,38 @@ impl LPSolver {
 impl Display for LPSolver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for v in &self.variables {
-            write!(f, "{}", v)?
+            writeln!(f, "{}", v)?
+        }
+        for row in 0..self.tableau.rows() {
+            let mut basic_var_prefix = String::new();
+            let mut row_string = String::new();
+            let basic_var = self.basic_variable_for_row[row];
+            for (_, column, f) in self.tableau.iterate_row(row) {
+                if column == basic_var {
+                    assert!(basic_var_prefix.is_empty());
+                    assert!(*f == -BigRational::one());
+                    basic_var_prefix = format!("{:>4} = ", self.variables[basic_var].name());
+                } else {
+                    let joiner = if f.is_negative() {
+                        " - "
+                    } else if f.is_positive() && !row_string.is_empty() {
+                        " + "
+                    } else {
+                        " "
+                    };
+                    let factor = if *f == BigRational::one() || *f == -BigRational::one() {
+                        String::new()
+                    } else {
+                        format!("{} ", f.abs())
+                    };
+                    row_string = format!(
+                        "{row_string}{joiner}{factor}{}",
+                        self.variables[column].name()
+                    );
+                }
+            }
+            assert!(!basic_var_prefix.is_empty());
+            writeln!(f, "{}{}", basic_var_prefix, row_string)?;
         }
         Ok(())
     }
@@ -162,7 +212,7 @@ impl LPSolver {
             if v.bounds.are_conflicting() {
                 return false;
             }
-            if self.basic_variables.contains_key(&id) {
+            if self.basic_variable_to_row.contains_key(&id) {
                 continue;
             }
             if let Some(diff) = v.update() {
@@ -185,15 +235,15 @@ impl LPSolver {
         None
     }
     fn first_replacement_var(&self, basic: usize, increasing: bool) -> Option<usize> {
-        for (_, column, factor) in self.tableau.iterate_row(self.basic_variables[&basic]) {
+        for (_, column, factor) in self.tableau.iterate_row(self.basic_variable_to_row[&basic]) {
             if column == basic {
                 continue;
             }
             assert!(!factor.is_zero());
             let check_upper = factor.is_negative() ^ increasing;
-            if check_upper && self.variables[column].violates_upper_bound() {
-                return Some(column);
-            } else if self.variables[column].violates_lower_bound() {
+            if (check_upper && self.variables[column].can_be_increased())
+                || self.variables[column].can_be_decreased()
+            {
                 return Some(column);
             }
         }
@@ -206,7 +256,7 @@ impl LPSolver {
         value_diff: RationalWithDelta,
         new_basic: usize,
     ) {
-        let old_row = self.basic_variables[&old_basic];
+        let old_row = self.basic_variable_to_row[&old_basic];
         let theta = value_diff / self.tableau.entry(old_row, new_basic).clone();
         self.variables[new_basic].value += theta.clone();
         // TODO combine this with the iteration in `correct_nonbasic`.
@@ -221,7 +271,7 @@ impl LPSolver {
     }
 
     fn pivot(&mut self, old_basic: usize, new_basic: usize) {
-        let pivot_row = self.basic_variables[&old_basic];
+        let pivot_row = self.basic_variable_to_row[&old_basic];
         let pivot = self.tableau.entry(pivot_row, new_basic).clone();
         assert!(!pivot.is_zero());
         if pivot != -BigRational::one() {
@@ -238,8 +288,8 @@ impl LPSolver {
                 self.tableau.add_multiple_of_row(pivot_row, row, factor);
             }
         }
-        self.basic_variables.remove_entry(&old_basic);
-        self.basic_variables.insert(new_basic, pivot_row);
+        self.basic_variable_to_row.remove_entry(&old_basic);
+        self.basic_variable_to_row.insert(new_basic, pivot_row);
         self.basic_variable_for_row[pivot_row] = new_basic;
     }
 }
@@ -257,7 +307,7 @@ fn combine_lower(
 ) -> Option<RationalWithDelta> {
     match (a, b) {
         (Some(x), Some(y)) => Some(max(x, y)),
-        (a, b) => a.and(b),
+        (a, b) => a.or(b),
     }
 }
 
@@ -267,7 +317,7 @@ fn combine_upper(
 ) -> Option<RationalWithDelta> {
     match (a, b) {
         (Some(x), Some(y)) => Some(min(x, y)),
-        (a, b) => a.and(b),
+        (a, b) => a.or(b),
     }
 }
 
@@ -287,8 +337,15 @@ mod test {
         let mut g = SymbolicVariableGenerator::default();
         let x = g.var("x");
         let y = g.var("y");
-        let t = g.var("_t");
         solver.append_row(g.id("_t"), 2 * x + y);
+        g.transfer_names(&mut solver);
+        solver.restrict_bounds(
+            g.id("_t"),
+            Bounds {
+                lower: Some(to_rat(0).into()),
+                upper: Some(to_rat(0).into()),
+            },
+        );
         solver.restrict_bounds(
             g.id("x"),
             Bounds {
@@ -296,13 +353,16 @@ mod test {
                 upper: None,
             },
         );
-        assert_eq!(solver.feasible, Some(true));
+        assert_eq!(solver.feasible(), Some(true));
         solver.restrict_bounds(
             g.id("y"),
             Bounds {
-                lower: None,
-                upper: Some((-to_rat(20)).into()),
+                lower: Some((to_rat(2)).into()),
+                upper: None,
             },
         );
+        assert_eq!(solver.feasible(), Some(false));
+        // Query again.
+        assert_eq!(solver.feasible(), Some(false));
     }
 }
