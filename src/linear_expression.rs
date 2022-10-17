@@ -78,6 +78,7 @@ impl SymbolicVariableGenerator {
             id
         })
     }
+    #[cfg(debug_assertions)]
     pub fn transfer_names(&self, solver: &mut LPSolver) {
         for (id, name) in self.id_to_name.iter().enumerate() {
             solver.set_variable_name(id, name.clone());
