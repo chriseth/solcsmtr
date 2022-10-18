@@ -28,27 +28,27 @@ impl<'a> SExpr<'a> {
 }
 
 pub fn parse_sexpr(input: &[u8]) -> SExpr {
-    let (result, rest) = parse_sexpr_internal(input, 0);
+    let (result, rest) = parse_sexpr_slice(input, 0);
     assert!(rest >= input.len());
     result
 }
 
-fn parse_sexpr_internal(input: &[u8], mut p: usize) -> (SExpr, usize) {
-    while input[p] == b' ' {
+pub fn parse_sexpr_slice(input: &[u8], mut p: usize) -> (SExpr, usize) {
+    while matches!(input[p], b' ' | b'\r' | b'\n') {
         p += 1
     }
     if input[p] == b'(' {
         let mut sub = Vec::new();
         p += 1;
         loop {
-            while input[p] == b' ' {
+            while matches!(input[p], b' ' | b'\r' | b'\n') {
                 p += 1
             }
             if input[p] == b')' {
                 break;
             }
             let next;
-            (next, p) = parse_sexpr_internal(input, p);
+            (next, p) = parse_sexpr_slice(input, p);
             sub.push(next);
         }
         (SExpr::Expr(sub), p + 1)
