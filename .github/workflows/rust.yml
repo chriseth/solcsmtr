@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SOLCSMTR_BENCHMARKS: ./solcsmtr-benchmarks/
 
 jobs:
   build:
@@ -16,7 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: ⚡ Cache
-      uses: actions/cache@v2
+      uses: actions/cache@v3
       with:
         path: |
           ~/.cargo/registry
@@ -28,7 +29,7 @@ jobs:
     - name: Download benchmarks
       run: git clone "https://github.com/chriseth/solcsmtr-benchmarks.git"
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose -- --include-ignored
     # - name: Lint
     #   run: cargo clippy --all --all-features -- -D warnings
     - name: Format
