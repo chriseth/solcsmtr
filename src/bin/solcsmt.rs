@@ -1,12 +1,15 @@
 use std::{fs::File, io::Read};
 
 use solcsmtr::sexpr_parser;
+use solcsmtr::smt_solver::SMTSolver;
 
 fn main() {
     handle_commands(&mut std::io::stdin());
 }
 
 fn handle_commands(input: &mut impl Read) {
+    let mut solver = SMTSolver::new();
+
     loop {
         let mut buf = Vec::new();
         input.read_to_end(&mut buf).unwrap();
@@ -29,11 +32,17 @@ fn handle_commands(input: &mut impl Read) {
                 b"set-option" => {}
                 b"declare-fun" => {}
                 b"define-fun" => {}
-                b"assert" => {}
-                b"push" => {}
-                b"pop" => {}
+                b"assert" => solver.add_assertion(&command_parts[1]),
+                b"push" => solver.push(),
+                b"pop" => solver.pop(),
                 b"set-logic" => {}
-                b"check-sat" => {}
+                b"check-sat" => {
+                    match solver.check() {
+                        Some(true) => println!("sat"),
+                        Some(false) => println!("unsat"),
+                        None => println!("unknown")
+                    }
+                }
                 b"exit" => return,
                 _ => panic!("Unknown command: {}", command),
             }
