@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::{self, Display},
+};
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
@@ -58,7 +61,7 @@ impl SMTSolver {
     }
 
     pub fn add_assertion(&mut self, assertion: &SExpr) {
-        println!("Adding assertion: {assertion}");
+        //println!("Adding assertion: {assertion}");
         let op = assertion.as_subexpr()[0].as_symbol();
         let args = &assertion.as_subexpr()[1..];
         match (op, args.len()) {
@@ -124,7 +127,48 @@ impl SMTSolver {
         todo!();
     }
     pub fn check(&mut self) -> Option<bool> {
+        println!("{self}");
         None
+    }
+}
+
+impl Display for SMTSolver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "SMT solver state:")?;
+        let variable_names = self
+            .variables
+            .iter()
+            .map(|(k, v)| (v.id, std::str::from_utf8(k).unwrap()))
+            .collect::<HashMap<_, _>>();
+        writeln!(f, "Linear equalities:")?;
+        for (main_var, expr) in &self.linear_constraints {
+            let mut row_string = String::new();
+            // TODO this is duplicated in lp_solver.rs
+            for (var, f) in expr {
+                let joiner = if f.is_negative() {
+                    " - "
+                } else if f.is_positive() && !row_string.is_empty() {
+                    " + "
+                } else {
+                    " "
+                };
+                let factor = if *f == BigRational::one() || *f == -BigRational::one() {
+                    String::new()
+                } else {
+                    format!("{} ", f.abs())
+                };
+                row_string = format!("{row_string}{joiner}{factor}{}", &variable_names[var]);
+            }
+            writeln!(f, "{} = {row_string}", variable_names[main_var])?;
+        }
+        // TODO:
+        /*
+        clauses: Vec<Clause>,
+        /// Real variable and its upper bound for each theory predicate, if taken positively.
+        bounds_for_theory_predicates: HashMap<VariableID, (VariableID, RationalWithDelta)>,
+        fixed_bounds: HashMap<VariableID, Bounds>,
+        */
+        Ok(())
     }
 }
 
@@ -287,11 +331,11 @@ impl SMTSolver {
                 (b"*", 2) => {
                     let mut left = self.parse_affine_expression(&args[0]);
                     let mut right = self.parse_affine_expression(&args[1]);
-                    if !left.1.iter().len() == 0 {
+                    if left.1.iter().len() != 0 {
                         (left, right) = (right, left)
                     }
                     assert!(left.1.iter().len() == 0);
-                    (left.0 * right.0, right.1)
+                    (left.0.clone() * right.0, left.0 * right.1)
                 }
                 (_, _) => {
                     panic!("Expected to parse into affine expression: {}", e);

@@ -31,10 +31,25 @@ impl IntoIterator for LinearExpression {
 impl Mul<LinearExpression> for i32 {
     type Output = LinearExpression;
     fn mul(self, rhs: LinearExpression) -> Self::Output {
+        // TODO only filter based on "self"
         LinearExpression(
             rhs.0
                 .iter()
                 .map(|(i, v)| (*i, v * BigRational::from_i32(self).unwrap()))
+                .filter(|(_, x)| !x.is_zero())
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+impl Mul<LinearExpression> for BigRational {
+    type Output = LinearExpression;
+    fn mul(self, rhs: LinearExpression) -> Self::Output {
+        // TODO only filter based on "self"
+        LinearExpression(
+            rhs.0
+                .iter()
+                .map(|(i, v)| (*i, v * self.clone()))
                 .filter(|(_, x)| !x.is_zero())
                 .collect::<Vec<_>>(),
         )
