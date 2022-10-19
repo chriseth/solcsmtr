@@ -77,28 +77,33 @@ impl SMTSolver {
                     self.add_assertion(a);
                 }
             }
-            (b"=", 2) => {
-                match self.determine_sort(&args[0]) {
-                    Sort::Bool => {
-                        let args = self.parse_into_literals(args);
-                        self.add_clause(vec![!args[0], args[1]]);
-                        self.add_clause(vec![args[0], !args[1]]);
+            (b"=" | b"<=", 2) => {
+                if op == b"=" && self.determine_sort(&args[0]) == Sort::Bool {
+                    let args = self.parse_into_literals(args);
+                    self.add_clause(vec![!args[0], args[1]]);
+                    self.add_clause(vec![args[0], !args[1]]);
+                } else {
+                    let left = self.parse_affine_expression(&args[0]);
+                    let right = self.parse_affine_expression(&args[1]);
+                    let (factor, var) =
+                        self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
+                    let is_negative = factor.is_negative();
+                    let constant = RationalWithDelta::from((right.0 - left.0) / factor);
+                    let mut bound = Bounds {
+                        lower: Some(constant.clone()),
+                        upper: Some(constant),
+                    };
+                    if op == b"<=" {
+                        bound.lower = None;
                     }
-                    Sort::Real => {
-                        let left = self.parse_affine_expression(&args[0]);
-                        let right = self.parse_affine_expression(&args[1]);
-                        let (factor, var) =
-                            self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
-                        let constant = RationalWithDelta::from((right.0 - left.0) / factor);
-                        // This is now reduced to: z = c
-                        self.fixed_bounds
-                            .entry(var.id)
-                            .or_default()
-                            .combine(Bounds {
-                                lower: Some(constant.clone()),
-                                upper: Some(constant),
-                            });
+                    if is_negative && op != b"=" {
+                        bound = Bounds {
+                            lower: bound.upper,
+                            upper: bound.lower,
+                        };
                     }
+                    // This is now reduced to: z = c
+                    self.fixed_bounds.entry(var.id).or_default().combine(bound);
                 }
             }
             (_, 0) => {
