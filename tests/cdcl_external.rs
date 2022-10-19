@@ -4,7 +4,7 @@ use solcsmtr::cdcl_dimacs::solve_dimacs_file;
 
 #[test]
 #[ignore]
-fn external_tests() {
+fn cdcl_external_tests() {
     let base_path = Path::new(&std::env::var("SOLCSMTR_BENCHMARKS").unwrap()).join("cdcl");
     let mut tests_run = 0;
     for (result, subdir) in [(true, "sat"), (false, "unsat")] {

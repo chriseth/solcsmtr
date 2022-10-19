@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use crate::{types::{Clause, Literal}, sexpr_parser::SExpr, types::RationalWithDelta};
+use crate::{
+    sexpr_parser::SExpr,
+    types::RationalWithDelta,
+    types::{Clause, Literal},
+};
 
 #[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sort {
@@ -41,7 +45,7 @@ impl SMTSolver {
     }
     pub fn declare_variable(&mut self, name: VariableName, sort: Sort) -> Variable {
         let id = (self.variables.len() + 1) as VariableID;
-        let var = Variable{id, sort};
+        let var = Variable { id, sort };
         assert!(self.variables.insert(name, var).is_none());
         var
     }
@@ -50,8 +54,10 @@ impl SMTSolver {
         let op = assertion.as_subexpr()[0].as_symbol();
         let args = &assertion.as_subexpr()[1..];
         match op {
-            b"true" => {},
-            b"false" => { panic!("Added false as top-level assertion.") },
+            b"true" => {}
+            b"false" => {
+                panic!("Added false as top-level assertion.")
+            }
             b"or" => {
                 // TODO empty?
                 let clause = self.parse_into_literals(args);
@@ -127,7 +133,7 @@ impl SMTSolver {
                 let var = self.variable(op);
                 assert!(var.sort == Sort::Bool);
                 Literal::from(var.id)
-            },
+            }
             (_, _) => {
                 panic!("Expected to parse into boolean expression: {}", e);
             }
@@ -135,7 +141,10 @@ impl SMTSolver {
     }
 
     fn parse_into_literals(&mut self, items: &[SExpr]) -> Vec<Literal> {
-        items.iter().map(|e| self.parse_into_literal(e)).collect::<Vec<_>>()
+        items
+            .iter()
+            .map(|e| self.parse_into_literal(e))
+            .collect::<Vec<_>>()
     }
 }
 
