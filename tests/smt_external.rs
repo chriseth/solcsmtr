@@ -14,7 +14,7 @@ fn smt_external_tests() {
             let mut input = fs::File::open(path).unwrap();
             let mut output = BufWriter::new(Vec::new());
             handle_commands(&mut input, &mut output);
-            assert_eq!(output.buffer(), subdir.as_bytes());
+            assert_eq!(std::str::from_utf8(output.buffer()).unwrap(), subdir);
             tests_run += 1;
         }
     }

@@ -284,6 +284,15 @@ impl SMTSolver {
                     .iter()
                     .map(|a| self.parse_affine_expression(a))
                     .fold(Default::default(), |l, r| (l.0 + r.0, l.1 + r.1)),
+                (b"*", 2) => {
+                    let mut left = self.parse_affine_expression(&args[0]);
+                    let mut right = self.parse_affine_expression(&args[1]);
+                    if !left.1.iter().len() == 0 {
+                        (left, right) = (right, left)
+                    }
+                    assert!(left.1.iter().len() == 0);
+                    (left.0 * right.0, right.1)
+                }
                 (_, _) => {
                     panic!("Expected to parse into affine expression: {}", e);
                 }
