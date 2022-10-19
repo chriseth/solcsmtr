@@ -7,3 +7,4 @@ pub mod smt_smtlib;
 pub mod smt_solver;
 mod sparse_matrix;
 mod types;
+pub mod variable_pool;

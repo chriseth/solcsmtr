@@ -1,14 +1,11 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::identities::One;
-use num_traits::{Num, Signed, Zero};
+use num_traits::{One, Signed, Zero};
 use std::cmp::{max, min};
-use std::{
-    fmt::{self, Display},
-    ops::{Add, AddAssign, Div, Mul, Not, Sub, SubAssign},
-};
+use std::fmt::{self, Display};
+use std::ops::{Add, AddAssign, Div, Mul, Not, Sub, SubAssign};
 
-pub type VariableID = i32;
+use crate::variable_pool::{Sort, Variable, VariableID, VariablePool};
 
 // TODO could also state guarantee that never zero.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,6 +17,21 @@ impl Literal {
     }
     pub fn polarity(&self) -> bool {
         self.0 > 0
+    }
+}
+
+pub fn format_literal(l: &Literal, pool: &VariablePool) -> String {
+    format!(
+        "{}{}",
+        if l.polarity() { "" } else { "¬" },
+        pool.name(l.var())
+    )
+}
+
+impl From<Variable> for Literal {
+    fn from(v: Variable) -> Self {
+        assert!(v.sort == Sort::Bool);
+        Literal::from(v.id)
     }
 }
 
@@ -39,6 +51,14 @@ impl From<VariableID> for Literal {
 
 pub type Clause = Vec<Literal>;
 
+pub fn format_clause(clause: &Clause, pool: &VariablePool) -> String {
+    clause
+        .iter()
+        .map(|l| format_literal(l, pool))
+        .collect::<Vec<_>>()
+        .join(" ∨ ")
+}
+
 #[derive(Default)]
 pub struct Bounds {
     pub lower: Option<RationalWithDelta>,
@@ -55,6 +75,19 @@ impl Bounds {
         } else {
             false
         }
+    }
+    pub fn format(&self, var_name: &str) -> String {
+        let left = if let Some(l) = &self.lower {
+            format!("{:>8} <=", format!("{}", l))
+        } else {
+            format!("{:8}   ", "")
+        };
+        let right = if let Some(u) = &self.upper {
+            format!("<= {:<8}", format!("{}", u))
+        } else {
+            format!("   {:8}", "")
+        };
+        format!("{left} {} {right}", format!("{:^4}", var_name),)
     }
 }
 

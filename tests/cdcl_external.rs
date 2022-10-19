@@ -12,7 +12,7 @@ fn cdcl_external_tests() {
             let path = &file.unwrap().path();
             println!("{}", path.to_string_lossy());
             let input = fs::read_to_string(path).unwrap();
-            assert_eq!(solve_dimacs_file(&input), result);
+            assert_eq!(solve_dimacs_file(&input, false), result);
             tests_run += 1;
         }
     }

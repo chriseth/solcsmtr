@@ -1,16 +1,21 @@
 use std::cmp::max;
 
 use crate::cdcl::CDCL;
-use crate::types::{Clause, Literal, VariableID};
+use crate::types::{Clause, Literal};
+use crate::variable_pool::{Sort, VariableID, VariablePool};
 
-pub fn solve_dimacs_file(input: &str) -> bool {
+pub fn solve_dimacs_file(input: &str, verbose: bool) -> bool {
     let (vars, clauses) = parse_input(&input);
-    let mut solver = CDCL::default();
+    let mut pool = VariablePool::new();
     for i in 0..vars {
-        solver.add_variable(format!("x{}", i + 1));
+        pool.declare_variable(format!("x{}", i + 1).as_bytes().into(), Sort::Bool);
     }
+    let mut solver = CDCL::new(&pool);
     for clause in clauses {
         solver.add_clause(clause);
+    }
+    if verbose {
+        eprintln!("{solver}");
     }
     solver.solve()
 }

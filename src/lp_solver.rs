@@ -1,13 +1,14 @@
-use std::{
-    cmp::{max, min},
-    collections::HashMap,
-    fmt::{self, Display},
-};
+use std::collections::HashMap;
 
-use num_rational::{BigRational, Ratio};
+use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
 
-use crate::{sparse_matrix::SparseMatrix, types::*};
+use crate::{
+    linear_expression::LinearExpression,
+    sparse_matrix::SparseMatrix,
+    types::*,
+    variable_pool::{VariableID, VariablePool},
+};
 
 type Number = BigRational;
 
@@ -27,8 +28,6 @@ pub struct LPSolver {
 struct Variable {
     value: RationalWithDelta,
     bounds: Bounds,
-    #[cfg(debug_assertions)]
-    name: String,
 }
 
 impl Variable {
@@ -56,33 +55,9 @@ impl Variable {
         let old = std::mem::replace(&mut self.value, v.clone());
         Some(v - old)
     }
-    pub fn name(&self) -> String {
-        #[cfg(debug_assertions)]
-        {
-            self.name.clone()
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            // TODO at some point, use the IDs
-            String::new()
-        }
-    }
-}
 
-impl Display for Variable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(l) = &self.bounds.lower {
-            write!(f, "{:>8} <= ", format!("{}", l))?
-        } else {
-            write!(f, "{:8}    ", "")?
-        }
-        write!(f, "{:^4}", self.name())?;
-        if let Some(u) = &self.bounds.upper {
-            write!(f, "<= {:<8}", format!("{}", u))?
-        } else {
-            write!(f, "   {:8}", "")?
-        }
-        write!(f, ":= {}", self.value)
+    pub fn format(&self, name: &str) -> String {
+        format!("{} := {}", self.bounds.format(name), self.value)
     }
 }
 
@@ -112,11 +87,6 @@ impl LPSolver {
         let var_id = self.add_outer_variable(outer_id);
         self.variables[var_id].bounds.combine(bounds);
     }
-    #[cfg(debug_assertions)]
-    pub fn set_variable_name(&mut self, outer_id: VariableID, name: String) {
-        let var_id = self.add_outer_variable(outer_id);
-        self.variables[var_id].name = name;
-    }
 
     pub fn feasible(&mut self) -> Option<bool> {
         if self.feasible.is_some() {
@@ -139,45 +109,44 @@ impl LPSolver {
         self.feasible = Some(true);
         Some(true)
     }
-}
 
-impl Display for LPSolver {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for v in &self.variables {
-            writeln!(f, "{}", v)?
-        }
-        for row in 0..self.tableau.rows() {
-            let mut basic_var_prefix = String::new();
-            let mut row_string = String::new();
-            let basic_var = self.basic_variable_for_row[row];
-            for (_, column, f) in self.tableau.iterate_row(row) {
+    pub fn format(&self, pool: &VariablePool) -> String {
+        let inverse_var_mapping = self
+            .var_mapping
+            .iter()
+            .map(|(outer, inner)| (*inner, *outer))
+            .collect::<HashMap<_, _>>();
+        let formatted_variables = self
+            .variables
+            .iter()
+            .enumerate()
+            .map(|(id, var)| var.format(pool.name(inverse_var_mapping[&id])))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let formatted_rows = (0..self.tableau.rows())
+            .map(|row| self.format_row(row, &|column| pool.name(inverse_var_mapping[&column])))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!("{formatted_variables}\n{formatted_rows}\n")
+    }
+
+    fn format_row<'a>(&self, row: usize, id_to_name: &'a impl Fn(usize) -> &'a str) -> String {
+        let mut basic_var_prefix = String::new();
+        let basic_var = self.basic_variable_for_row[row];
+        let nonbasic =
+            LinearExpression::format(self.tableau.iterate_row(row).filter_map(|(_, column, f)| {
                 if column == basic_var {
                     assert!(basic_var_prefix.is_empty());
                     assert!(*f == -BigRational::one());
-                    basic_var_prefix = format!("{:>4} = ", self.variables[basic_var].name());
+                    basic_var_prefix = format!("{:>4} = ", id_to_name(column));
+                    None
                 } else {
-                    let joiner = if f.is_negative() {
-                        " - "
-                    } else if f.is_positive() && !row_string.is_empty() {
-                        " + "
-                    } else {
-                        " "
-                    };
-                    let factor = if *f == BigRational::one() || *f == -BigRational::one() {
-                        String::new()
-                    } else {
-                        format!("{} ", f.abs())
-                    };
-                    row_string = format!(
-                        "{row_string}{joiner}{factor}{}",
-                        self.variables[column].name()
-                    );
+                    Some((id_to_name(column), f))
                 }
-            }
-            assert!(!basic_var_prefix.is_empty());
-            writeln!(f, "{}{}", basic_var_prefix, row_string)?;
-        }
-        Ok(())
+            }));
+
+        assert!(!basic_var_prefix.is_empty());
+        format!("{basic_var_prefix}{nonbasic}")
     }
 }
 
@@ -281,7 +250,7 @@ impl LPSolver {
 
 #[cfg(test)]
 mod test {
-    use crate::linear_expression::test::SymbolicVariableGenerator;
+    use crate::{linear_expression::LinearExpression, variable_pool::Sort};
 
     use super::*;
     #[test]
@@ -291,21 +260,23 @@ mod test {
     }
     #[test]
     fn simple() {
+        let mut pool = VariablePool::new();
+        let var_x = pool.declare_variable("x".as_bytes().into(), Sort::Real);
+        let var_y = pool.declare_variable("y".as_bytes().into(), Sort::Real);
+        let x = LinearExpression::variable(var_x.id);
+        let y = LinearExpression::variable(var_y.id);
+        let var_t = pool.declare_variable("t".as_bytes().into(), Sort::Real);
         let mut solver = LPSolver::default();
-        let mut g = SymbolicVariableGenerator::default();
-        let x = g.var("x");
-        let y = g.var("y");
-        solver.append_row(g.id("_t"), 2 * x + y);
-        g.transfer_names(&mut solver);
+        solver.append_row(var_t.id, 2 * x + y);
         solver.restrict_bounds(
-            g.id("_t"),
+            var_t.id,
             Bounds {
                 lower: Some(to_rat(0).into()),
                 upper: Some(to_rat(0).into()),
             },
         );
         solver.restrict_bounds(
-            g.id("x"),
+            var_x.id,
             Bounds {
                 lower: Some(to_rat(2).into()),
                 upper: None,
@@ -313,13 +284,14 @@ mod test {
         );
         assert_eq!(solver.feasible(), Some(true));
         solver.restrict_bounds(
-            g.id("y"),
+            var_y.id,
             Bounds {
                 lower: Some((to_rat(2)).into()),
                 upper: None,
             },
         );
         assert_eq!(solver.feasible(), Some(false));
+        println!("{}", solver.format(&pool));
         // Query again.
         assert_eq!(solver.feasible(), Some(false));
     }

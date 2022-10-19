@@ -1,8 +1,4 @@
-use std::{
-    fmt::{self, Display, Formatter},
-    iter::Peekable,
-    str::{Chars, FromStr},
-};
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, PartialEq)]
 pub enum SExpr<'a> {

@@ -2,22 +2,20 @@ use std::{
     cmp::max,
     collections::{HashMap, HashSet},
     fmt::{self, Display},
-    ops::Not,
 };
 
-use num_traits::abs;
-
-use crate::types::{Clause, Literal, VariableID};
+use crate::{
+    types::{format_clause, Clause, Literal},
+    variable_pool::{VariableID, VariablePool},
+};
 
 type ClauseIndex = usize;
 type AssignmentTrailIndex = usize;
 /// Index into decision_points.
 type DecisionLevel = usize;
 
-#[derive(Default)]
-pub struct CDCL {
-    // TODO remove string unless debug
-    variables: Vec<String>,
+pub struct CDCL<'a> {
+    variables: &'a VariablePool,
     // List of clauses including learnt clauses.
     clauses: Vec<Clause>,
     /// These are pointers from literals to the clauses they occur in,
@@ -40,13 +38,17 @@ struct Assignment {
     reason: Option<ClauseIndex>,
 }
 
-impl CDCL {
-    pub fn add_variable(&mut self, name: String) -> VariableID {
-        if self.variables.is_empty() {
-            self.variables.push("".to_string());
+impl<'a> CDCL<'a> {
+    pub fn new(pool: &'a VariablePool) -> CDCL<'a> {
+        CDCL {
+            variables: pool,
+            clauses: Default::default(),
+            watches: Default::default(),
+            assignments: Default::default(),
+            assignment_trail: Default::default(),
+            assignment_queue_pointer: Default::default(),
+            decision_points: Default::default(),
         }
-        self.variables.push(name);
-        (self.variables.len() - 1) as VariableID
     }
     pub fn add_clause(&mut self, c: Clause) -> ClauseIndex {
         // TODO assert that the clause does not contain the same variable twice.
@@ -79,23 +81,22 @@ impl CDCL {
                 }
             }
         }
-        unreachable!();
     }
     pub fn decision_level(&self) -> usize {
         self.decision_points.len()
     }
 }
 
-impl Display for CDCL {
+impl Display for CDCL<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for clause in &self.clauses {
-            writeln!(f, "c {}", self.format_clause(clause))?;
+            writeln!(f, "c {}", format_clause(clause, self.variables))?;
         }
         Ok(())
     }
 }
 
-impl CDCL {
+impl CDCL<'_> {
     fn propagate(&mut self) -> Option<Clause> {
         while self.assignment_queue_pointer < self.assignment_trail.len() {
             let literal = self.assignment_trail[self.assignment_queue_pointer];
@@ -246,21 +247,12 @@ impl CDCL {
         self.assignment_trail.push(literal);
     }
     fn next_decision_variable(&self) -> Option<VariableID> {
-        (1..self.variables.len())
-            .map(|v| v as VariableID)
-            .find(|v| self.is_unassigned(*v))
+        self.variables.all_ids().find(|v| self.is_unassigned(*v))
     }
 
     fn is_assigned_true(&self, literal: &Literal) -> bool {
         if let Some(a) = self.assignments.get(&literal.var()) {
             a.value == literal.polarity()
-        } else {
-            false
-        }
-    }
-    fn is_assigned_false(&self, literal: &Literal) -> bool {
-        if let Some(a) = self.assignments.get(&literal.var()) {
-            a.value != literal.polarity()
         } else {
             false
         }
@@ -275,50 +267,40 @@ impl CDCL {
     fn is_unassigned(&self, v: VariableID) -> bool {
         !self.assignments.contains_key(&v)
     }
-
-    pub fn format_clause(&self, c: &Clause) -> String {
-        c.iter()
-            .map(|l| self.format_literal(l))
-            .collect::<Vec<_>>()
-            .join(" ∨ ")
-    }
-    pub fn format_literal(&self, l: &Literal) -> String {
-        format!(
-            "{}{}",
-            if l.polarity() { "" } else { "¬" },
-            self.variables[l.var() as usize]
-        )
-    }
 }
 
 #[cfg(test)]
 mod test {
+    use crate::variable_pool::Sort;
+
     use super::*;
 
-    fn setup() -> (CDCL, Literal, Literal, Literal) {
-        let mut s = CDCL::default();
-        let x = Literal::from(s.add_variable("x".to_string()));
-        let y = Literal::from(s.add_variable("y".to_string()));
-        let z = Literal::from(s.add_variable("z".to_string()));
-        (s, x, y, z)
+    fn setup(pool: &mut VariablePool) -> (CDCL<'_>, Literal, Literal, Literal) {
+        let x = Literal::from(pool.declare_variable("x".as_bytes().into(), Sort::Bool));
+        let y = Literal::from(pool.declare_variable("y".as_bytes().into(), Sort::Bool));
+        let z = Literal::from(pool.declare_variable("z".as_bytes().into(), Sort::Bool));
+        (CDCL::new(pool), x, y, z)
     }
 
     #[test]
     fn empty() {
-        let mut s = CDCL::default();
+        let mut pool = VariablePool::new();
+        let mut s = CDCL::new(&mut pool);
         assert!(s.solve());
     }
 
     #[test]
     fn trivial() {
-        let (mut s, x, ..) = setup();
+        let mut pool = VariablePool::new();
+        let (mut s, x, ..) = setup(&mut pool);
         s.add_clause(vec![x]);
         assert!(s.solve());
     }
 
     #[test]
     fn conflicting() {
-        let (mut s, x, ..) = setup();
+        let mut pool = VariablePool::new();
+        let (mut s, x, ..) = setup(&mut pool);
         s.add_clause(vec![x]);
         s.add_clause(vec![!x]);
         assert!(!s.solve());
@@ -326,7 +308,8 @@ mod test {
 
     #[test]
     fn slightly_complex() {
-        let (mut s, x, y, z, ..) = setup();
+        let mut pool = VariablePool::new();
+        let (mut s, x, y, z, ..) = setup(&mut pool);
         s.add_clause(vec![!x, y]);
         s.add_clause(vec![!y, !x, z]);
         s.add_clause(vec![!z, !y]);
@@ -335,7 +318,8 @@ mod test {
 
     #[test]
     fn multi_backtrack() {
-        let (mut s, x, y, z, ..) = setup();
+        let mut pool = VariablePool::new();
+        let (mut s, _, y, z, ..) = setup(&mut pool);
         s.add_clause(vec![!y, z]);
         s.add_clause(vec![!z]);
         assert!(s.solve());

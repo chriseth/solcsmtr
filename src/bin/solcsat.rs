@@ -10,7 +10,8 @@ fn main() {
         println!("c waiting for data on standard input");
         std::io::stdin().read_to_string(&mut input).unwrap();
     }
-    if solve_dimacs_file(&input) {
+    // TODO make "verbose" an option
+    if solve_dimacs_file(&input, true) {
         println!("s SATISFIABLE");
     } else {
         println!("s UNSATISFIABLE");

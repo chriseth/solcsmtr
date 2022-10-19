@@ -1,9 +1,8 @@
 use std::io::{Read, Write};
 
-use crate::{
-    sexpr_parser,
-    smt_solver::{self, SMTSolver},
-};
+use crate::sexpr_parser;
+use crate::smt_solver::SMTSolver;
+use crate::variable_pool::Sort;
 
 pub fn handle_commands(input: &mut impl Read, output: &mut impl Write) {
     let mut solver = SMTSolver::new();
@@ -33,8 +32,8 @@ pub fn handle_commands(input: &mut impl Read, output: &mut impl Write) {
                     let name = parts[1].as_symbol();
                     assert!(parts[2].as_subexpr().is_empty());
                     let sort = match parts[3].as_symbol() {
-                        b"Real" => smt_solver::Sort::Real,
-                        b"Bool" => smt_solver::Sort::Bool,
+                        b"Real" => Sort::Real,
+                        b"Bool" => Sort::Bool,
                         _ => panic!("Invalid variable sort: {}", parts[3]),
                     };
                     solver.declare_variable(name.into(), sort);
@@ -44,11 +43,14 @@ pub fn handle_commands(input: &mut impl Read, output: &mut impl Write) {
                 b"push" => solver.push(),
                 b"pop" => solver.pop(),
                 b"set-logic" => {}
-                b"check-sat" => match solver.check() {
-                    Some(true) => writeln!(output, "sat").unwrap(),
-                    Some(false) => writeln!(output, "unsat").unwrap(),
-                    None => writeln!(output, "unknown").unwrap(),
-                },
+                b"check-sat" => {
+                    eprintln!("{}", solver);
+                    match solver.check() {
+                        Some(true) => writeln!(output, "sat").unwrap(),
+                        Some(false) => writeln!(output, "unsat").unwrap(),
+                        None => writeln!(output, "unknown").unwrap(),
+                    }
+                }
                 b"exit" => return,
                 _ => panic!("Unknown command: {}", command),
             }

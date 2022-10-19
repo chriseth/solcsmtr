@@ -1,46 +1,15 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    fmt::{self, Display},
-};
+use std::collections::HashMap;
+use std::fmt::{self, Display};
 
 use num_bigint::BigInt;
 use num_rational::BigRational;
-use num_traits::{Num, One, Signed, Zero};
+use num_traits::{One, Signed, Zero};
 
-use crate::{
-    linear_expression::LinearExpression,
-    sexpr_parser::SExpr,
-    types::{Bounds, RationalWithDelta},
-    types::{Clause, Literal},
-};
-
-#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Sort {
-    #[default]
-    Bool,
-    Real,
-}
-
-type VariableID = i32;
-type VariableName = Box<[u8]>;
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Variable {
-    id: VariableID,
-    sort: Sort,
-}
-// TODO we do not have to use use disjoint sets of IDs for bool and real variables.
-
-impl From<Variable> for Literal {
-    fn from(v: Variable) -> Self {
-        assert!(v.sort == Sort::Bool);
-        Literal::from(v.id)
-    }
-}
+use crate::{linear_expression::LinearExpression, sexpr_parser::SExpr, types::*, variable_pool::*};
 
 #[derive(Default)]
 pub struct SMTSolver {
-    variables: HashMap<VariableName, Variable>,
+    variables: VariablePool,
     /// Constraints of the form z = 2x + y
     linear_constraints: HashMap<VariableID, Vec<(VariableID, BigRational)>>,
     clauses: Vec<Clause>,
@@ -54,10 +23,7 @@ impl SMTSolver {
         Default::default()
     }
     pub fn declare_variable(&mut self, name: VariableName, sort: Sort) -> Variable {
-        let id = (self.variables.len() + 1) as VariableID;
-        let var = Variable { id, sort };
-        assert!(self.variables.insert(name, var).is_none());
-        var
+        self.variables.declare_variable(name, sort)
     }
 
     pub fn add_assertion(&mut self, assertion: &SExpr) {
@@ -127,7 +93,7 @@ impl SMTSolver {
         todo!();
     }
     pub fn check(&mut self) -> Option<bool> {
-        println!("{self}");
+        //println!("{self}");
         None
     }
 }
@@ -135,61 +101,36 @@ impl SMTSolver {
 impl Display for SMTSolver {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "SMT solver state:")?;
-        let variable_names = self
-            .variables
-            .iter()
-            .map(|(k, v)| (v.id, std::str::from_utf8(k).unwrap()))
-            .collect::<HashMap<_, _>>();
+        writeln!(f, "Clauses:")?;
+        for clause in &self.clauses {
+            writeln!(f, "{}", format_clause(clause, &self.variables))?;
+        }
         writeln!(f, "Linear equalities:")?;
         for (main_var, expr) in &self.linear_constraints {
-            let mut row_string = String::new();
-            // TODO this is kind of duplicated in lp_solver.rs
-            for (var, f) in expr {
-                let joiner = if f.is_negative() {
-                    " - "
-                } else if f.is_positive() && !row_string.is_empty() {
-                    " + "
-                } else {
-                    " "
-                };
-                let factor = if *f == BigRational::one() || *f == -BigRational::one() {
-                    String::new()
-                } else {
-                    format!("{} ", f.abs())
-                };
-                row_string = format!("{row_string}{joiner}{factor}{}", &variable_names[var]);
-            }
-            writeln!(f, "{} = {row_string}", variable_names[main_var])?;
-        }
-        writeln!(f, "Clauses:")?;
-        //TODO de-duplicate this code
-        // use a "variable pool" that assigns global IDs and
-        // cant ranslate between names and IDs and vice-versa
-        for clause in &self.clauses {
             writeln!(
                 f,
-                "{}",
-                clause
-                    .iter()
-                    .map(|l| {
-                        format!(
-                            "{}{}",
-                            if l.polarity() { "" } else { "¬" },
-                            variable_names[&l.var()]
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ∨ ")
+                "{} = {}",
+                self.variables.name(*main_var),
+                LinearExpression::format(expr.iter().map(|(v, f)| (self.variables.name(*v), f)))
             )?;
         }
         writeln!(f, "Fixed bounds:")?;
-        // TODO:
-        /*
-        clauses: Vec<Clause>,
-        /// Real variable and its upper bound for each theory predicate, if taken positively.
-        bounds_for_theory_predicates: HashMap<VariableID, (VariableID, RationalWithDelta)>,
-        fixed_bounds: HashMap<VariableID, Bounds>,
-        */
+        for (var, bounds) in &self.fixed_bounds {
+            writeln!(f, "{}", bounds.format(self.variables.name(*var)))?;
+        }
+        writeln!(f, "Theory predicate bounds:")?;
+        for (predicate, (var, upper_bound)) in &self.bounds_for_theory_predicates {
+            let formatted_bounds = Bounds {
+                lower: None,
+                upper: Some(upper_bound.clone()),
+            }
+            .format(self.variables.name(*var));
+            writeln!(
+                f,
+                "{} <=> {formatted_bounds}",
+                self.variables.name(*predicate)
+            )?;
+        }
         Ok(())
     }
 }
@@ -199,16 +140,16 @@ impl SMTSolver {
         self.clauses.push(clause);
     }
     fn variable(&self, name: &[u8]) -> Variable {
-        self.variables[name]
+        self.variables.variable(name)
     }
     fn new_bool_variable(&mut self) -> Variable {
         // TODO make the names properly unique.
-        let name = format!("_t_{}", self.variables.len() + 1);
+        let name = format!("_b_{}", self.variables.variable_count() + 1);
         self.declare_variable(name.as_bytes().into(), Sort::Bool)
     }
     fn new_real_variable(&mut self) -> Variable {
         // TODO make the names properly unique.
-        let name = format!("_r_{}", self.variables.len() + 1);
+        let name = format!("_r_{}", self.variables.variable_count() + 1);
         self.declare_variable(name.as_bytes().into(), Sort::Real)
     }
 
