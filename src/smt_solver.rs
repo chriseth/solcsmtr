@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use num_bigint::BigInt;
 use num_rational::BigRational;
+use num_traits::{Num, One, Signed, Zero};
 
 use crate::{
     linear_expression::LinearExpression,
@@ -37,7 +39,7 @@ impl From<Variable> for Literal {
 pub struct SMTSolver {
     variables: HashMap<VariableName, Variable>,
     /// Constraints of the form z = 2x + y
-    linear_constraints: HashMap<VariableID, Vec<(VariableID, RationalWithDelta)>>,
+    linear_constraints: HashMap<VariableID, Vec<(VariableID, BigRational)>>,
     clauses: Vec<Clause>,
     /// Real variable and its upper bound for each theory predicate, if taken positively.
     bounds_for_theory_predicates: HashMap<VariableID, (VariableID, RationalWithDelta)>,
@@ -105,6 +107,11 @@ impl SMTSolver {
         let name = format!("_t_{}", self.variables.len() + 1);
         self.declare_variable(name.as_bytes().into(), Sort::Bool)
     }
+    fn new_real_variable(&mut self) -> Variable {
+        // TODO make the names properly unique.
+        let name = format!("_r_{}", self.variables.len() + 1);
+        self.declare_variable(name.as_bytes().into(), Sort::Real)
+    }
 
     fn parse_into_literal(&mut self, e: &SExpr) -> Literal {
         // TODO there are tons of optimizations here, we don't always need to craete
@@ -145,15 +152,14 @@ impl SMTSolver {
                     Some(Sort::Real) => {
                         let left = self.parse_affine_expression(&args[0]);
                         let right = self.parse_affine_expression(&args[1]);
-                        let linear = left.1 - right.1;
-                        let constant = RationalWithDelta::from(right.0 - left.0);
-                        let var = self.extract_real_var_or_replace_by_equivalent(linear);
+                        let (factor, var) =
+                            self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
+                        let constant = RationalWithDelta::from((right.0 - left.0) / factor);
+                        // This is now reduced to: z = c
                         let less_or_equal = self.new_theory_predicate(var, constant.clone());
                         // !(x < c) is equivalent to x >= c
-                        let less_than = self.new_theory_predicate(
-                            var,
-                            constant + RationalWithDelta::delta(),
-                        );
+                        let less_than =
+                            self.new_theory_predicate(var, constant + RationalWithDelta::delta());
                         self.encode_and(less_or_equal, !less_than)
                     }
                     None => panic!("Could not determine sort of arguments to {}", e),
@@ -161,20 +167,27 @@ impl SMTSolver {
             }
             (b"<=", 2) | (b"<", 2) | (b">", 2) | (b">=", 2) => {
                 let is_strict = op == b"<" || op == b">";
-                let mut left = self.parse_affine_expression(&args[0]);
-                let mut right = self.parse_affine_expression(&args[1]);
-                if op == b">" || op == b">=" {
-                    (left, right) = (right, left);
+                let mut is_reversed = op == b">=" || op == b">";
+                let left = self.parse_affine_expression(&args[0]);
+                let right = self.parse_affine_expression(&args[1]);
+                let (factor, var) =
+                    self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
+                if factor.is_negative() {
+                    // We divide by factor below, so we need to flip the operator.
+                    is_reversed = !is_reversed;
                 }
-                let linear = left.1 - right.1;
-                let constant = RationalWithDelta::from(right.0 - left.0)
-                    + if is_strict {
-                        RationalWithDelta::delta()
-                    } else {
-                        RationalWithDelta::default()
-                    };
-                let var = self.extract_real_var_or_replace_by_equivalent(linear);
-                self.new_theory_predicate(var, constant)
+                let mut constant = RationalWithDelta::from((right.0 - left.0) / factor);
+                // This is now reduced to: var OP constant
+                // In the reversed case, we will negate, so strict and non-strict flip
+                if is_strict ^ is_reversed {
+                    constant += RationalWithDelta::delta()
+                }
+                let p = self.new_theory_predicate(var, constant);
+                if is_reversed {
+                    !p
+                } else {
+                    p
+                }
             }
             (_, _) => {
                 panic!("Expected to parse into boolean expression: {}", e);
@@ -212,11 +225,53 @@ impl SMTSolver {
     }
 
     fn parse_affine_expression(&mut self, e: &SExpr) -> (BigRational, LinearExpression) {
-        todo!();
+        println!("{}", e);
+        if let SExpr::Symbol(s) = e {
+            if matches!(s[0], b'0'..=b'9') {
+                (
+                    BigInt::parse_bytes(s, 10).unwrap().into(),
+                    LinearExpression::default(),
+                )
+            } else {
+                let var = self.variable(s);
+                assert!(var.sort == Sort::Real);
+                (BigRational::zero(), LinearExpression::variable(var.id))
+            }
+        } else {
+            let op = e.as_subexpr()[0].as_symbol();
+            let args = &e.as_subexpr()[1..];
+            match (op, args.len()) {
+                (_, _) => {
+                    panic!("Expected to parse into affine expression: {}", e);
+                }
+            }
+        }
     }
 
-    fn extract_real_var_or_replace_by_equivalent(&mut self, expr: LinearExpression) -> Variable {
-        todo!();
+    /// If the linear expression is of the form "a * x", returns (a, x).
+    /// Otherwise, creates a new variable z and adds "z = a * x" to the linear constraints.
+    /// It might also re-use an existing linear constraint.
+    fn extract_real_var_or_replace_by_equivalent(
+        &mut self,
+        expr: LinearExpression,
+    ) -> (BigRational, Variable) {
+        assert!(expr.iter().len() > 0);
+        if expr.iter().len() == 1 {
+            let (id, factor) = expr.into_iter().next().unwrap();
+            (
+                factor,
+                Variable {
+                    id,
+                    sort: Sort::Real,
+                },
+            )
+        } else {
+            // TODO try to re-use existing constraints.
+            let new_var = self.new_real_variable();
+            self.linear_constraints
+                .insert(new_var.id, expr.into_iter().collect::<Vec<_>>());
+            (One::one(), new_var)
+        }
     }
 
     fn is_theory_predicate(&self, var: Variable) -> bool {

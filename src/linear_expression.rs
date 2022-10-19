@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Deref, Mul, Sub};
 
 use num_rational::BigRational;
 use num_traits::identities::One;
@@ -10,6 +10,15 @@ use crate::types::VariableID;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct LinearExpression(Vec<(VariableID, BigRational)>);
+
+impl LinearExpression {
+    pub fn variable(var: VariableID) -> LinearExpression {
+        LinearExpression(vec![(var, One::one())])
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, (VariableID, BigRational)> {
+        self.0.iter()
+    }
+}
 
 impl IntoIterator for LinearExpression {
     type Item = (VariableID, BigRational);
