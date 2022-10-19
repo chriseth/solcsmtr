@@ -1,4 +1,4 @@
-use std::{fs, path::Path, io::BufWriter};
+use std::{fs, io::BufWriter, path::Path};
 
 use solcsmtr::smt_smtlib::handle_commands;
 

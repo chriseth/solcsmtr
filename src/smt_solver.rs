@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
+use num_rational::BigRational;
+
 use crate::{
+    linear_expression::LinearExpression,
     sexpr_parser::SExpr,
     types::RationalWithDelta,
     types::{Clause, Literal},
@@ -21,6 +24,7 @@ pub struct Variable {
     id: VariableID,
     sort: Sort,
 }
+// TODO we do not have to use use disjoint sets of IDs for bool and real variables.
 
 impl From<Variable> for Literal {
     fn from(v: Variable) -> Self {
@@ -35,8 +39,8 @@ pub struct SMTSolver {
     /// Constraints of the form z = 2x + y
     linear_constraints: HashMap<VariableID, Vec<(VariableID, RationalWithDelta)>>,
     clauses: Vec<Clause>,
-    /// Upper bound for each theory predicate, if taken positively.
-    bounds_for_theory_predicates: HashMap<VariableID, RationalWithDelta>,
+    /// Real variable and its upper bound for each theory predicate, if taken positively.
+    bounds_for_theory_predicates: HashMap<VariableID, (VariableID, RationalWithDelta)>,
 }
 
 impl SMTSolver {
@@ -105,34 +109,72 @@ impl SMTSolver {
     fn parse_into_literal(&mut self, e: &SExpr) -> Literal {
         // TODO there are tons of optimizations here, we don't always need to craete
         // an equivalent boolean, for example if there are nested 'or's
+        if let SExpr::Symbol(s) = e {
+            // TODO constants
+            let var = self.variable(s);
+            assert!(var.sort == Sort::Bool);
+            return Literal::from(var.id);
+        }
         let op = e.as_subexpr()[0].as_symbol();
         let args = &e.as_subexpr()[1..];
         match (op, args.len()) {
             (b"or", 2) => {
                 // TODO extend to longer
-                let result: Literal = self.new_bool_variable().into();
                 let args = self.parse_into_literals(args);
-                self.add_clause(vec![args[0], args[1], !result]);
-                self.add_clause(vec![!args[0], result]);
-                self.add_clause(vec![!args[1], result]);
-                result
+                self.encode_or(args[0], args[1])
             }
             (b"and", 2) => {
-                let result: Literal = self.new_bool_variable().into();
                 let args = self.parse_into_literals(args);
-                self.add_clause(vec![!args[0], !args[1], result]);
-                self.add_clause(vec![args[0], !result]);
-                self.add_clause(vec![args[1], !result]);
-                result
+                self.encode_and(args[0], args[1])
             }
             (b"not", 1) => {
                 assert!(args.len() == 1);
                 !self.parse_into_literal(&args[0])
             }
-            (_, 0) => {
-                let var = self.variable(op);
-                assert!(var.sort == Sort::Bool);
-                Literal::from(var.id)
+            (b"=", 2) => {
+                match self.determine_sort(&args[0]) {
+                    Some(Sort::Bool) => {
+                        let result: Literal = self.new_bool_variable().into();
+                        let args = self.parse_into_literals(args);
+                        self.add_clause(vec![!args[0], args[1], !result]);
+                        self.add_clause(vec![args[0], !args[1], !result]);
+                        self.add_clause(vec![!args[0], !args[1], result]);
+                        self.add_clause(vec![args[0], args[1], result]);
+                        result
+                    }
+                    Some(Sort::Real) => {
+                        let left = self.parse_affine_expression(&args[0]);
+                        let right = self.parse_affine_expression(&args[1]);
+                        let linear = left.1 - right.1;
+                        let constant = RationalWithDelta::from(right.0 - left.0);
+                        let var = self.extract_real_var_or_replace_by_equivalent(linear);
+                        let less_or_equal = self.new_theory_predicate(var, constant.clone());
+                        // !(x < c) is equivalent to x >= c
+                        let less_than = self.new_theory_predicate(
+                            var,
+                            constant + RationalWithDelta::delta(),
+                        );
+                        self.encode_and(less_or_equal, !less_than)
+                    }
+                    None => panic!("Could not determine sort of arguments to {}", e),
+                }
+            }
+            (b"<=", 2) | (b"<", 2) | (b">", 2) | (b">=", 2) => {
+                let is_strict = op == b"<" || op == b">";
+                let mut left = self.parse_affine_expression(&args[0]);
+                let mut right = self.parse_affine_expression(&args[1]);
+                if op == b">" || op == b">=" {
+                    (left, right) = (right, left);
+                }
+                let linear = left.1 - right.1;
+                let constant = RationalWithDelta::from(right.0 - left.0)
+                    + if is_strict {
+                        RationalWithDelta::delta()
+                    } else {
+                        RationalWithDelta::default()
+                    };
+                let var = self.extract_real_var_or_replace_by_equivalent(linear);
+                self.new_theory_predicate(var, constant)
             }
             (_, _) => {
                 panic!("Expected to parse into boolean expression: {}", e);
@@ -140,11 +182,55 @@ impl SMTSolver {
         }
     }
 
+    fn encode_or(&mut self, arg1: Literal, arg2: Literal) -> Literal {
+        // TODO extend to longer
+        let result: Literal = self.new_bool_variable().into();
+        self.add_clause(vec![arg1, arg2, !result]);
+        self.add_clause(vec![!arg1, result]);
+        self.add_clause(vec![!arg2, result]);
+        result
+    }
+
+    fn encode_and(&mut self, arg1: Literal, arg2: Literal) -> Literal {
+        !self.encode_or(!arg1, !arg2)
+    }
+
     fn parse_into_literals(&mut self, items: &[SExpr]) -> Vec<Literal> {
         items
             .iter()
             .map(|e| self.parse_into_literal(e))
             .collect::<Vec<_>>()
+    }
+
+    fn determine_sort(&self, e: &SExpr) -> Option<Sort> {
+        if let SExpr::Symbol(s) = e {
+            let var = self.variable(s);
+            Some(var.sort)
+        } else {
+            None
+        }
+    }
+
+    fn parse_affine_expression(&mut self, e: &SExpr) -> (BigRational, LinearExpression) {
+        todo!();
+    }
+
+    fn extract_real_var_or_replace_by_equivalent(&mut self, expr: LinearExpression) -> Variable {
+        todo!();
+    }
+
+    fn is_theory_predicate(&self, var: Variable) -> bool {
+        assert!(var.sort == Sort::Bool);
+        self.bounds_for_theory_predicates.contains_key(&var.id)
+    }
+
+    /// Creates a new boolean variable equivalent to "var <= upper_bound".
+    fn new_theory_predicate(&mut self, var: Variable, upper_bound: RationalWithDelta) -> Literal {
+        assert!(var.sort == Sort::Real);
+        let predicate = self.new_bool_variable();
+        self.bounds_for_theory_predicates
+            .insert(predicate.id, (var.id, upper_bound));
+        predicate.into()
     }
 }
 
@@ -175,5 +261,7 @@ if there is more than one variable, we simplify:
 store lower/upper bound relation as predicate (which can be easily negated)
 
 TODO Question: How to encode equality? I.e. how to negate it? Do we need to?
+
+z = 2 <=> (z <= 2 && z >= 2)
 
 */

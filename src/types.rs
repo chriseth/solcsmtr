@@ -1,5 +1,6 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
+use num_traits::identities::One;
 use num_traits::{Num, Signed, Zero};
 use std::{
     fmt::{self, Display},
@@ -57,10 +58,10 @@ impl From<BigRational> for RationalWithDelta {
 }
 
 impl RationalWithDelta {
-    pub fn delta(v: BigRational) -> RationalWithDelta {
+    pub fn delta() -> RationalWithDelta {
         RationalWithDelta {
             value: Default::default(),
-            delta: v,
+            delta: One::one(),
         }
     }
     #[inline]
@@ -141,13 +142,11 @@ impl Display for RationalWithDelta {
 
 #[cfg(test)]
 mod test {
-    use num_traits::identities::One;
-
     use crate::types::RationalWithDelta;
 
     #[test]
     pub fn comparison() {
-        let d = RationalWithDelta::delta(One::one());
+        let d = RationalWithDelta::delta();
         let zero = RationalWithDelta::default();
         assert!(d > zero);
         assert!(zero == zero);
