@@ -39,7 +39,7 @@ fn handle_commands(input: &mut impl Read) {
                         b"Bool" => smt_solver::Sort::Bool,
                         _ => panic!("Invalid variable sort: {}", parts[3]),
                     };
-                    solver.declare_variable(name.into(), sort)
+                    solver.declare_variable(name.into(), sort);
                 }
                 //b"define-fun" => {}
                 b"assert" => solver.add_assertion(&parts[1]),
