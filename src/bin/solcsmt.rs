@@ -1,7 +1,7 @@
 use std::{fs::File, io::Read};
 
-use solcsmtr::{sexpr_parser, smt_solver};
 use solcsmtr::smt_solver::SMTSolver;
+use solcsmtr::{sexpr_parser, smt_solver};
 
 fn main() {
     handle_commands(&mut std::io::stdin());
@@ -36,24 +36,21 @@ fn handle_commands(input: &mut impl Read) {
                     assert!(parts[2].as_subexpr().is_empty());
                     let sort = match parts[3].as_symbol() {
                         b"Real" => smt_solver::Sort::Real,
-                        b"Bool"=> smt_solver::Sort::Bool,
-                        _ => panic!("Invalid variable sort: {}", parts[3])
+                        b"Bool" => smt_solver::Sort::Bool,
+                        _ => panic!("Invalid variable sort: {}", parts[3]),
                     };
                     solver.declare_variable(name.into(), sort)
-
                 }
                 //b"define-fun" => {}
                 b"assert" => solver.add_assertion(&parts[1]),
                 b"push" => solver.push(),
                 b"pop" => solver.pop(),
                 b"set-logic" => {}
-                b"check-sat" => {
-                    match solver.check() {
-                        Some(true) => println!("sat"),
-                        Some(false) => println!("unsat"),
-                        None => println!("unknown")
-                    }
-                }
+                b"check-sat" => match solver.check() {
+                    Some(true) => println!("sat"),
+                    Some(false) => println!("unsat"),
+                    None => println!("unknown"),
+                },
                 b"exit" => return,
                 _ => panic!("Unknown command: {}", command),
             }

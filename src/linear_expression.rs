@@ -6,13 +6,14 @@ use num_traits::identities::One;
 use num_traits::{FromPrimitive, Zero};
 
 use crate::lp_solver::LPSolver;
+use crate::types::VariableID;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct LinearExpression(Vec<(usize, BigRational)>);
+pub struct LinearExpression(Vec<(VariableID, BigRational)>);
 
 impl IntoIterator for LinearExpression {
-    type Item = (usize, BigRational);
-    type IntoIter = <Vec<(usize, BigRational)> as IntoIterator>::IntoIter;
+    type Item = (VariableID, BigRational);
+    type IntoIter = <Vec<(VariableID, BigRational)> as IntoIterator>::IntoIter;
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
@@ -61,34 +62,36 @@ impl Sub for LinearExpression {
     }
 }
 
-#[derive(Default)]
-pub struct SymbolicVariableGenerator {
-    id_to_name: Vec<String>,
-    name_to_id: HashMap<String, usize>,
-}
+#[cfg(test)]
+pub mod test {
+    use crate::smt_solver::Variable;
 
-impl SymbolicVariableGenerator {
-    pub fn var(&mut self, name: &str) -> LinearExpression {
-        LinearExpression(vec![(self.id(name), One::one())])
+    use super::*;
+
+    #[derive(Default)]
+    pub struct SymbolicVariableGenerator {
+        id_to_name: Vec<String>,
+        name_to_id: HashMap<String, VariableID>,
     }
-    pub fn id(&mut self, name: &str) -> usize {
-        *self.name_to_id.entry(name.to_string()).or_insert_with(|| {
-            let id = self.id_to_name.len();
-            self.id_to_name.push(name.to_string());
-            id
-        })
-    }
-    #[cfg(debug_assertions)]
-    pub fn transfer_names(&self, solver: &mut LPSolver) {
-        for (id, name) in self.id_to_name.iter().enumerate() {
-            solver.set_variable_name(id, name.clone());
+
+    impl SymbolicVariableGenerator {
+        pub fn var(&mut self, name: &str) -> LinearExpression {
+            LinearExpression(vec![(self.id(name), One::one())])
+        }
+        pub fn id(&mut self, name: &str) -> VariableID {
+            *self.name_to_id.entry(name.to_string()).or_insert_with(|| {
+                let id = self.id_to_name.len() as VariableID;
+                self.id_to_name.push(name.to_string());
+                id
+            })
+        }
+        #[cfg(debug_assertions)]
+        pub fn transfer_names(&self, solver: &mut LPSolver) {
+            for (id, name) in self.id_to_name.iter().enumerate() {
+                solver.set_variable_name(id as VariableID, name.clone());
+            }
         }
     }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
 
     #[test]
     fn simple() {

@@ -3,8 +3,39 @@ use num_rational::BigRational;
 use num_traits::{Num, Signed, Zero};
 use std::{
     fmt::{self, Display},
-    ops::{Add, AddAssign, Div, Mul, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, Mul, Not, Sub, SubAssign},
 };
+
+pub type VariableID = i32;
+
+// TODO could also state guarantee that never zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Literal(VariableID);
+
+impl Literal {
+    pub fn var(&self) -> VariableID {
+        self.0.abs()
+    }
+    pub fn polarity(&self) -> bool {
+        self.0 > 0
+    }
+}
+
+impl Not for Literal {
+    type Output = Literal;
+
+    fn not(self) -> Self {
+        Literal(-self.0)
+    }
+}
+
+impl From<VariableID> for Literal {
+    fn from(var: VariableID) -> Self {
+        Self(var)
+    }
+}
+
+pub type Clause = Vec<Literal>;
 
 pub fn to_rat(x: i32) -> BigRational {
     BigRational::from_integer(BigInt::from(x))

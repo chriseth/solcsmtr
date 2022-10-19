@@ -1,6 +1,7 @@
 use std::cmp::max;
 
-use crate::cdcl::{Clause, Literal, Variable, CDCL};
+use crate::cdcl::CDCL;
+use crate::types::{Clause, Literal, VariableID};
 
 pub fn solve_dimacs_file(input: &str) -> bool {
     let (vars, clauses) = parse_input(&input);
@@ -30,7 +31,7 @@ fn parse_input(input: &str) -> (usize, Vec<Clause>) {
                     .filter(|s| !s.is_empty())
                     .map(|e| e.parse::<i64>().unwrap())
                     .map(|lit| {
-                        let var = lit.abs() as Variable;
+                        let var = lit.abs() as VariableID;
                         vars = max(vars, var as usize);
                         if lit < 0 {
                             !Literal::from(var)

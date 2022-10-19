@@ -19,7 +19,7 @@ pub struct LPSolver {
     basic_variable_to_row: HashMap<usize, usize>,
     basic_variable_for_row: Vec<usize>,
     /// Maps outer variable IDs to inner variable IDs.
-    var_mapping: HashMap<usize, usize>,
+    var_mapping: HashMap<VariableID, usize>,
     feasible: Option<bool>,
 }
 
@@ -108,7 +108,11 @@ impl Bounds {
 impl LPSolver {
     /// Appends a row represented by the variable `outer_id`. The row must not have any
     /// factor corresponding to that variable.
-    pub fn append_row(&mut self, outer_id: usize, data: impl IntoIterator<Item = (usize, Number)>) {
+    pub fn append_row(
+        &mut self,
+        outer_id: VariableID,
+        data: impl IntoIterator<Item = (VariableID, Number)>,
+    ) {
         self.feasible = None;
         let basic_id = self.add_outer_variable(outer_id);
         // TODO do this without copying - maybe separate variables into their own sub-structure?
@@ -122,13 +126,13 @@ impl LPSolver {
         self.basic_variable_for_row.push(basic_id);
         self.basic_variable_to_row.insert(basic_id, row);
     }
-    pub fn restrict_bounds(&mut self, outer_id: usize, bounds: Bounds) {
+    pub fn restrict_bounds(&mut self, outer_id: VariableID, bounds: Bounds) {
         self.feasible = None;
         let var_id = self.add_outer_variable(outer_id);
         self.variables[var_id].bounds.combine(bounds);
     }
     #[cfg(debug_assertions)]
-    pub fn set_variable_name(&mut self, outer_id: usize, name: String) {
+    pub fn set_variable_name(&mut self, outer_id: VariableID, name: String) {
         let var_id = self.add_outer_variable(outer_id);
         self.variables[var_id].name = name;
     }
@@ -197,7 +201,7 @@ impl Display for LPSolver {
 }
 
 impl LPSolver {
-    fn add_outer_variable(&mut self, outer_id: usize) -> usize {
+    fn add_outer_variable(&mut self, outer_id: VariableID) -> usize {
         *self.var_mapping.entry(outer_id).or_insert_with(|| {
             self.variables.push(Default::default());
             self.variables.len() - 1
@@ -323,7 +327,7 @@ fn combine_upper(
 
 #[cfg(test)]
 mod test {
-    use crate::linear_expression::SymbolicVariableGenerator;
+    use crate::linear_expression::test::SymbolicVariableGenerator;
 
     use super::*;
     #[test]

@@ -7,36 +7,8 @@ use std::{
 
 use num_traits::abs;
 
-pub type Variable = i32;
+use crate::types::{Clause, Literal, VariableID};
 
-// TODO could also state guarantee that never zero.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Literal(Variable);
-
-impl Literal {
-    pub fn var(&self) -> Variable {
-        abs(self.0)
-    }
-    pub fn polarity(&self) -> bool {
-        self.0 > 0
-    }
-}
-
-impl Not for Literal {
-    type Output = Literal;
-
-    fn not(self) -> Self {
-        Literal(-self.0)
-    }
-}
-
-impl From<Variable> for Literal {
-    fn from(var: Variable) -> Self {
-        Self(var)
-    }
-}
-
-pub type Clause = Vec<Literal>;
 type ClauseIndex = usize;
 type AssignmentTrailIndex = usize;
 /// Index into decision_points.
@@ -53,7 +25,7 @@ pub struct CDCL {
     watches: HashMap<Literal, Vec<ClauseIndex>>,
     // TODO better use vector?
     // If yes, need to handle "unassigned".
-    assignments: HashMap<Variable, Assignment>,
+    assignments: HashMap<VariableID, Assignment>,
     assignment_trail: Vec<Literal>,
     /// Index into assignment_trail: All assignments starting there have not yet been propagated.
     assignment_queue_pointer: AssignmentTrailIndex,
@@ -69,12 +41,12 @@ struct Assignment {
 }
 
 impl CDCL {
-    pub fn add_variable(&mut self, name: String) -> Variable {
+    pub fn add_variable(&mut self, name: String) -> VariableID {
         if self.variables.is_empty() {
             self.variables.push("".to_string());
         }
         self.variables.push(name);
-        (self.variables.len() - 1) as Variable
+        (self.variables.len() - 1) as VariableID
     }
     pub fn add_clause(&mut self, c: Clause) -> ClauseIndex {
         // TODO assert that the clause does not contain the same variable twice.
@@ -273,9 +245,9 @@ impl CDCL {
         self.assignments.insert(literal.var(), a);
         self.assignment_trail.push(literal);
     }
-    fn next_decision_variable(&self) -> Option<Variable> {
+    fn next_decision_variable(&self) -> Option<VariableID> {
         (1..self.variables.len())
-            .map(|v| v as Variable)
+            .map(|v| v as VariableID)
             .find(|v| self.is_unassigned(*v))
     }
 
@@ -300,7 +272,7 @@ impl CDCL {
             true
         }
     }
-    fn is_unassigned(&self, v: Variable) -> bool {
+    fn is_unassigned(&self, v: VariableID) -> bool {
         !self.assignments.contains_key(&v)
     }
 

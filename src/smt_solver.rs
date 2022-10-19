@@ -1,18 +1,18 @@
 use std::collections::HashMap;
 
-use crate::sexpr_parser::SExpr;
+use crate::{types::Clause, sexpr_parser::SExpr, types::RationalWithDelta};
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Sort {
     #[default]
     Bool,
     Real,
 }
 
-type VariableID = u32;
+type VariableID = i32;
 type VariableName = Box<[u8]>;
 
-#[derive(Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Variable {
     id: VariableID,
     sort: Sort,
@@ -21,6 +21,9 @@ pub struct Variable {
 #[derive(Default)]
 pub struct SMTSolver {
     variables: HashMap<VariableName, Variable>,
+    /// Constraints of the form z = 2x + y
+    linear_constraints: HashMap<VariableID, Vec<(VariableID, RationalWithDelta)>>,
+    clauses: Vec<Clause>,
 }
 
 impl SMTSolver {
@@ -43,6 +46,8 @@ impl SMTSolver {
         None
     }
 }
+
+impl SMTSolver {}
 
 /*
 turn
