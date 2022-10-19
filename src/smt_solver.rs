@@ -143,7 +143,7 @@ impl Display for SMTSolver {
         writeln!(f, "Linear equalities:")?;
         for (main_var, expr) in &self.linear_constraints {
             let mut row_string = String::new();
-            // TODO this is duplicated in lp_solver.rs
+            // TODO this is kind of duplicated in lp_solver.rs
             for (var, f) in expr {
                 let joiner = if f.is_negative() {
                     " - "
@@ -161,6 +161,28 @@ impl Display for SMTSolver {
             }
             writeln!(f, "{} = {row_string}", variable_names[main_var])?;
         }
+        writeln!(f, "Clauses:")?;
+        //TODO de-duplicate this code
+        // use a "variable pool" that assigns global IDs and
+        // cant ranslate between names and IDs and vice-versa
+        for clause in &self.clauses {
+            writeln!(
+                f,
+                "{}",
+                clause
+                    .iter()
+                    .map(|l| {
+                        format!(
+                            "{}{}",
+                            if l.polarity() { "" } else { "¬" },
+                            variable_names[&l.var()]
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ∨ ")
+            )?;
+        }
+        writeln!(f, "Fixed bounds:")?;
         // TODO:
         /*
         clauses: Vec<Clause>,
