@@ -7,7 +7,7 @@ use num_traits::{Num, One, Signed, Zero};
 use crate::{
     linear_expression::LinearExpression,
     sexpr_parser::SExpr,
-    types::RationalWithDelta,
+    types::{Bounds, RationalWithDelta},
     types::{Clause, Literal},
 };
 
@@ -43,6 +43,7 @@ pub struct SMTSolver {
     clauses: Vec<Clause>,
     /// Real variable and its upper bound for each theory predicate, if taken positively.
     bounds_for_theory_predicates: HashMap<VariableID, (VariableID, RationalWithDelta)>,
+    fixed_bounds: HashMap<VariableID, Bounds>,
 }
 
 impl SMTSolver {
@@ -57,30 +58,57 @@ impl SMTSolver {
     }
 
     pub fn add_assertion(&mut self, assertion: &SExpr) {
+        println!("Adding assertion: {assertion}");
         let op = assertion.as_subexpr()[0].as_symbol();
         let args = &assertion.as_subexpr()[1..];
-        match op {
-            b"true" => {}
-            b"false" => {
+        match (op, args.len()) {
+            (b"true", 0) => {}
+            (b"false", 0) => {
                 panic!("Added false as top-level assertion.")
             }
-            b"or" => {
+            (b"or", _) => {
                 // TODO empty?
                 let clause = self.parse_into_literals(args);
                 self.add_clause(clause);
             }
-            b"and" => {
+            (b"and", _) => {
                 // TODO empty?
                 for a in args {
                     self.add_assertion(a);
                 }
             }
-            _ => {
-                assert_eq!(args.len(), 0);
+            (b"=", 2) => {
+                match self.determine_sort(&args[0]) {
+                    Sort::Bool => {
+                        let args = self.parse_into_literals(args);
+                        self.add_clause(vec![!args[0], args[1]]);
+                        self.add_clause(vec![args[0], !args[1]]);
+                    }
+                    Sort::Real => {
+                        let left = self.parse_affine_expression(&args[0]);
+                        let right = self.parse_affine_expression(&args[1]);
+                        let (factor, var) =
+                            self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
+                        let constant = RationalWithDelta::from((right.0 - left.0) / factor);
+                        // This is now reduced to: z = c
+                        self.fixed_bounds
+                            .entry(var.id)
+                            .or_default()
+                            .combine(Bounds {
+                                lower: Some(constant.clone()),
+                                upper: Some(constant),
+                            });
+                    }
+                }
+            }
+            (_, 0) => {
                 let var = self.variable(op);
                 assert!(var.sort == Sort::Bool);
                 let lit = Literal::from(var.id);
                 self.add_clause(vec![lit]);
+            }
+            _ => {
+                todo!("Assertion not yet implemented: {assertion}")
             }
         }
     }
@@ -140,7 +168,7 @@ impl SMTSolver {
             }
             (b"=", 2) => {
                 match self.determine_sort(&args[0]) {
-                    Some(Sort::Bool) => {
+                    Sort::Bool => {
                         let result: Literal = self.new_bool_variable().into();
                         let args = self.parse_into_literals(args);
                         self.add_clause(vec![!args[0], args[1], !result]);
@@ -149,7 +177,7 @@ impl SMTSolver {
                         self.add_clause(vec![args[0], args[1], result]);
                         result
                     }
-                    Some(Sort::Real) => {
+                    Sort::Real => {
                         let left = self.parse_affine_expression(&args[0]);
                         let right = self.parse_affine_expression(&args[1]);
                         let (factor, var) =
@@ -162,7 +190,6 @@ impl SMTSolver {
                             self.new_theory_predicate(var, constant + RationalWithDelta::delta());
                         self.encode_and(less_or_equal, !less_than)
                     }
-                    None => panic!("Could not determine sort of arguments to {}", e),
                 }
             }
             (b"<=", 2) | (b"<", 2) | (b">", 2) | (b">=", 2) => {
@@ -215,17 +242,19 @@ impl SMTSolver {
             .collect::<Vec<_>>()
     }
 
-    fn determine_sort(&self, e: &SExpr) -> Option<Sort> {
+    fn determine_sort(&self, e: &SExpr) -> Sort {
         if let SExpr::Symbol(s) = e {
             let var = self.variable(s);
-            Some(var.sort)
+            var.sort
         } else {
-            None
+            match e.as_subexpr()[0].as_symbol() {
+                b"-" => Sort::Real,
+                _ => panic!("Could not determine sort of arguments to {}", e),
+            }
         }
     }
 
     fn parse_affine_expression(&mut self, e: &SExpr) -> (BigRational, LinearExpression) {
-        println!("{}", e);
         if let SExpr::Symbol(s) = e {
             if matches!(s[0], b'0'..=b'9') {
                 (
@@ -241,6 +270,15 @@ impl SMTSolver {
             let op = e.as_subexpr()[0].as_symbol();
             let args = &e.as_subexpr()[1..];
             match (op, args.len()) {
+                (b"-", 2) => {
+                    let (lc, ll) = self.parse_affine_expression(&args[0]);
+                    let (rc, rl) = self.parse_affine_expression(&args[1]);
+                    (lc - rc, ll - rl)
+                }
+                (b"+", _) => args
+                    .iter()
+                    .map(|a| self.parse_affine_expression(a))
+                    .fold(Default::default(), |l, r| (l.0 + r.0, l.1 + r.1)),
                 (_, _) => {
                     panic!("Expected to parse into affine expression: {}", e);
                 }
@@ -288,35 +326,3 @@ impl SMTSolver {
         predicate.into()
     }
 }
-
-/*
-turn
--(x + 7 <= 8) \/ A
-into
--(x <= 1) \/ A
-into
--T1  \/ A
-T1: x <= 1
-
-turn 2x + 9y < 7
-into
-x + 4.5y < 3.5
-into
-T1
-row: z = x + 4.5y
-T2 z < 3.5
-
-So for every "theory predicate":
-we perform "constant propagation" until we have "a_i * x_i <=/< Constant"
-then we divide by "a_0"
-if there is more than one variable, we simplify:
- - unless the LHS expression does not already have a corresponding variable:
- - introduce new variable and add equality as fact
- - replace the LHS by the new variable
-store lower/upper bound relation as predicate (which can be easily negated)
-
-TODO Question: How to encode equality? I.e. how to negate it? Do we need to?
-
-z = 2 <=> (z <= 2 && z >= 2)
-
-*/

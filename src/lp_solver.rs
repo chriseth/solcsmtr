@@ -86,25 +86,6 @@ impl Display for Variable {
     }
 }
 
-#[derive(Default)]
-pub struct Bounds {
-    pub lower: Option<RationalWithDelta>,
-    pub upper: Option<RationalWithDelta>,
-}
-
-impl Bounds {
-    pub fn combine(&mut self, other: Bounds) {
-        *self = combine_bounds(std::mem::take(self), other);
-    }
-    pub fn are_conflicting(&self) -> bool {
-        if let (Some(l), Some(u)) = (&self.lower, &self.upper) {
-            l > u
-        } else {
-            false
-        }
-    }
-}
-
 impl LPSolver {
     /// Appends a row represented by the variable `outer_id`. The row must not have any
     /// factor corresponding to that variable.
@@ -295,33 +276,6 @@ impl LPSolver {
         self.basic_variable_to_row.remove_entry(&old_basic);
         self.basic_variable_to_row.insert(new_basic, pivot_row);
         self.basic_variable_for_row[pivot_row] = new_basic;
-    }
-}
-
-fn combine_bounds(a: Bounds, b: Bounds) -> Bounds {
-    Bounds {
-        lower: combine_lower(a.lower, b.lower),
-        upper: combine_upper(a.upper, b.upper),
-    }
-}
-
-fn combine_lower(
-    a: Option<RationalWithDelta>,
-    b: Option<RationalWithDelta>,
-) -> Option<RationalWithDelta> {
-    match (a, b) {
-        (Some(x), Some(y)) => Some(max(x, y)),
-        (a, b) => a.or(b),
-    }
-}
-
-fn combine_upper(
-    a: Option<RationalWithDelta>,
-    b: Option<RationalWithDelta>,
-) -> Option<RationalWithDelta> {
-    match (a, b) {
-        (Some(x), Some(y)) => Some(min(x, y)),
-        (a, b) => a.or(b),
     }
 }
 

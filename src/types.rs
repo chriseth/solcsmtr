@@ -2,6 +2,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::identities::One;
 use num_traits::{Num, Signed, Zero};
+use std::cmp::{max, min};
 use std::{
     fmt::{self, Display},
     ops::{Add, AddAssign, Div, Mul, Not, Sub, SubAssign},
@@ -37,6 +38,52 @@ impl From<VariableID> for Literal {
 }
 
 pub type Clause = Vec<Literal>;
+
+#[derive(Default)]
+pub struct Bounds {
+    pub lower: Option<RationalWithDelta>,
+    pub upper: Option<RationalWithDelta>,
+}
+
+impl Bounds {
+    pub fn combine(&mut self, other: Bounds) {
+        *self = combine_bounds(std::mem::take(self), other);
+    }
+    pub fn are_conflicting(&self) -> bool {
+        if let (Some(l), Some(u)) = (&self.lower, &self.upper) {
+            l > u
+        } else {
+            false
+        }
+    }
+}
+
+fn combine_bounds(a: Bounds, b: Bounds) -> Bounds {
+    Bounds {
+        lower: combine_lower(a.lower, b.lower),
+        upper: combine_upper(a.upper, b.upper),
+    }
+}
+
+fn combine_lower(
+    a: Option<RationalWithDelta>,
+    b: Option<RationalWithDelta>,
+) -> Option<RationalWithDelta> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(max(x, y)),
+        (a, b) => a.or(b),
+    }
+}
+
+fn combine_upper(
+    a: Option<RationalWithDelta>,
+    b: Option<RationalWithDelta>,
+) -> Option<RationalWithDelta> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(min(x, y)),
+        (a, b) => a.or(b),
+    }
+}
 
 pub fn to_rat(x: i32) -> BigRational {
     BigRational::from_integer(BigInt::from(x))
