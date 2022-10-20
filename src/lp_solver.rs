@@ -88,26 +88,28 @@ impl LPSolver {
         self.variables[var_id].bounds.combine(bounds);
     }
 
-    pub fn feasible(&mut self) -> Option<bool> {
+    pub fn feasible(&mut self) -> bool {
         if self.feasible.is_some() {
-            return self.feasible;
+            return self.feasible.unwrap();
         }
         if !self.correct_nonbasic() {
-            return Some(false);
-        }
-        while let Some((cbv, diff)) = self.first_conflicting_basic_variable() {
-            let var = &self.variables[cbv];
-            if let Some(replacement) = self.first_replacement_var(cbv, diff.is_positive()) {
-                self.pivot_and_update(cbv, diff, replacement);
-            } else {
-                // Undo correction of basic vaiable.
-                self.variables[cbv].value -= diff;
-                self.feasible = Some(false);
-                return Some(false);
+            self.feasible = Some(false);
+        } else {
+            while let Some((cbv, diff)) = self.first_conflicting_basic_variable() {
+                if let Some(replacement) = self.first_replacement_var(cbv, diff.is_positive()) {
+                    self.pivot_and_update(cbv, diff, replacement);
+                } else {
+                    // Undo correction of basic vaiable.
+                    self.variables[cbv].value -= diff;
+                    self.feasible = Some(false);
+                    break;
+                }
+            }
+            if self.feasible.is_none() {
+                self.feasible = Some(true)
             }
         }
-        self.feasible = Some(true);
-        Some(true)
+        self.feasible.unwrap()
     }
 
     pub fn format(&self, pool: &VariablePool) -> String {
@@ -256,7 +258,7 @@ mod test {
     #[test]
     fn empty() {
         let mut solver = LPSolver::default();
-        assert_eq!(solver.feasible(), Some(true));
+        assert_eq!(solver.feasible(), true);
     }
     #[test]
     fn simple() {
@@ -282,7 +284,7 @@ mod test {
                 upper: None,
             },
         );
-        assert_eq!(solver.feasible(), Some(true));
+        assert_eq!(solver.feasible(), true);
         solver.restrict_bounds(
             var_y.id,
             Bounds {
@@ -290,9 +292,9 @@ mod test {
                 upper: None,
             },
         );
-        assert_eq!(solver.feasible(), Some(false));
+        assert_eq!(solver.feasible(), false);
         println!("{}", solver.format(&pool));
         // Query again.
-        assert_eq!(solver.feasible(), Some(false));
+        assert_eq!(solver.feasible(), false);
     }
 }

@@ -3,7 +3,9 @@ use std::fmt::{self, Display};
 
 use num_rational::BigRational;
 
+use crate::cdcl::CDCL;
 use crate::linear_expression::LinearExpression;
+use crate::lp_solver::LPSolver;
 use crate::sexpr_parser::SExpr;
 use crate::smt_encoder::SMTEncoder;
 use crate::types::*;
@@ -45,6 +47,19 @@ impl SMTSolver {
         todo!();
     }
     pub fn check(&mut self) -> Option<bool> {
+        // TODO we could keep the state of the solver for longer.
+        let mut cdcl = CDCL::new(&self.variables);
+        let mut lpsolver = LPSolver::default();
+        for (var, bounds) in &self.fixed_bounds {
+            lpsolver.restrict_bounds(*var, bounds.clone());
+        }
+        for (basic_var, linear_expr) in &self.linear_constraints {
+            lpsolver.append_row(*basic_var, linear_expr.iter().cloned());
+        }
+        if !lpsolver.feasible() {
+            return Some(false);
+        }
+
         //println!("{self}");
         None
     }

@@ -59,7 +59,7 @@ pub fn format_clause(clause: &Clause, pool: &VariablePool) -> String {
         .join(" ∨ ")
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Bounds {
     pub lower: Option<RationalWithDelta>,
     pub upper: Option<RationalWithDelta>,
