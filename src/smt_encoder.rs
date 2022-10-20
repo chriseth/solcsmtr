@@ -225,7 +225,7 @@ impl<'a> SMTEncoder<'a> {
             var.sort
         } else {
             match e.as_subexpr()[0].as_symbol() {
-                b"-" => Sort::Real,
+                b"-" | b"+" | b"*" => Sort::Real,
                 _ => panic!("Could not determine sort of arguments to {}", e),
             }
         }

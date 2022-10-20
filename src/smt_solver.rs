@@ -47,8 +47,7 @@ impl SMTSolver {
         todo!();
     }
     pub fn check(&mut self) -> Option<bool> {
-        // TODO we could keep the state of the solver for longer.
-        let mut cdcl = CDCL::new(&self.variables);
+        // TODO we could keep the state of the lp solver for longer.
         let mut lpsolver = LPSolver::default();
         for (var, bounds) in &self.fixed_bounds {
             lpsolver.restrict_bounds(*var, bounds.clone());
@@ -56,9 +55,15 @@ impl SMTSolver {
         for (basic_var, linear_expr) in &self.linear_constraints {
             lpsolver.append_row(*basic_var, linear_expr.iter().cloned());
         }
+        println!("{}", lpsolver.format(&self.variables));
         if !lpsolver.feasible() {
             return Some(false);
         }
+        if self.bounds_for_theory_predicates.is_empty() && self.clauses.is_empty() {
+            return Some(true);
+        }
+
+        //let mut cdcl = CDCL::new(&self.variables);
 
         //println!("{self}");
         None
@@ -106,5 +111,51 @@ impl SMTSolver {
     fn is_theory_predicate(&self, var: Variable) -> bool {
         assert!(var.sort == Sort::Bool);
         self.bounds_for_theory_predicates.contains_key(&var.id)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::sexpr_parser::parse_sexpr;
+
+    use super::*;
+
+    fn setup() -> SMTSolver {
+        let mut s = SMTSolver::new();
+        s.declare_variable("x".as_bytes().into(), Sort::Real);
+        s.declare_variable("y".as_bytes().into(), Sort::Real);
+        s.declare_variable("z".as_bytes().into(), Sort::Real);
+        s
+    }
+
+    #[test]
+    fn simple_bounds() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(= x 4)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(<= x 2)"));
+        assert!(s.check() == Some(false));
+    }
+
+    #[test]
+    fn simple_arithmetics() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(= (+ x y) 4)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(<= x 2)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(<= 2 y)"));
+        assert!(s.check() == Some(false));
+    }
+    #[test]
+    fn more_arithmetics() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(= (- x (* 2 y)) 4)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(<= x 2)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(<= 1 y)"));
+        println!("{}", s);
+        assert!(s.check() == Some(false));
     }
 }

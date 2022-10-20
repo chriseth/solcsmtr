@@ -47,17 +47,32 @@ impl Variable {
     }
     /// Updates the variable to be within bounds and returns the difference
     pub fn update(&mut self) -> Option<RationalWithDelta> {
-        let v = match &self.bounds {
-            Bounds { lower: Some(l), .. } if self.value < *l => l.clone(),
-            Bounds { upper: Some(u), .. } if self.value > *u => u.clone(),
-            _ => return None,
-        };
-        let old = std::mem::replace(&mut self.value, v.clone());
-        Some(v - old)
+        if let Some(v) = self.needs_update() {
+            let old = std::mem::replace(&mut self.value, v.clone());
+            Some(v - old)
+        } else {
+            None
+        }
+    }
+
+    /// Returns an in-bounds value in case the variable is currently out
+    /// of bounds. Otherwise, returns None.
+    pub fn needs_update(&self) -> Option<RationalWithDelta> {
+        match &self.bounds {
+            Bounds { lower: Some(l), .. } if self.value < *l => Some(l.clone()),
+            Bounds { upper: Some(u), .. } if self.value > *u => Some(u.clone()),
+            _ => None,
+        }
     }
 
     pub fn format(&self, name: &str) -> String {
-        format!("{} := {}", self.bounds.format(name), self.value)
+        use colored::Colorize;
+        let s = format!("{} := {}", self.bounds.format(name), self.value);
+        if self.needs_update().is_some() {
+            format!("{}", s.red())
+        } else {
+            s
+        }
     }
 }
 
@@ -72,10 +87,11 @@ impl LPSolver {
         self.feasible = None;
         let basic_id = self.add_outer_variable(outer_id);
         // TODO do this without copying - maybe separate variables into their own sub-structure?
-        let data = data
+        let mut data = data
             .into_iter()
             .map(|(outer_id, v)| (self.add_outer_variable(outer_id), v))
             .collect::<Vec<_>>();
+        data.sort();
         let row = self.tableau.rows();
         self.tableau.append_row(data.into_iter());
         *self.tableau.entry(row, basic_id) = -BigRational::one();
@@ -95,7 +111,7 @@ impl LPSolver {
         if !self.correct_nonbasic() {
             self.feasible = Some(false);
         } else {
-            while let Some((cbv, diff)) = self.first_conflicting_basic_variable() {
+            while let Some((cbv, diff)) = self.fix_first_conflicting_basic_variable() {
                 if let Some(replacement) = self.first_replacement_var(cbv, diff.is_positive()) {
                     self.pivot_and_update(cbv, diff, replacement);
                 } else {
@@ -182,7 +198,7 @@ impl LPSolver {
     }
     /// Finds the first conflicting basic variable, updates it and returns its ID and
     /// difference after the update.
-    fn first_conflicting_basic_variable(&mut self) -> Option<(usize, RationalWithDelta)> {
+    fn fix_first_conflicting_basic_variable(&mut self) -> Option<(usize, RationalWithDelta)> {
         for id in &self.basic_variable_for_row {
             if let Some(diff) = self.variables[*id].update() {
                 return Some((*id, diff));
@@ -198,14 +214,14 @@ impl LPSolver {
             assert!(!factor.is_zero());
             let check_upper = factor.is_negative() ^ increasing;
             if (check_upper && self.variables[column].can_be_increased())
-                || self.variables[column].can_be_decreased()
+                || (!check_upper && self.variables[column].can_be_decreased())
             {
                 return Some(column);
             }
         }
         None
     }
-    // TODO actually does this updatE?
+
     fn pivot_and_update(
         &mut self,
         old_basic: usize,
@@ -213,6 +229,7 @@ impl LPSolver {
         new_basic: usize,
     ) {
         let old_row = self.basic_variable_to_row[&old_basic];
+        assert!(!self.tableau.entry(old_row, new_basic).is_zero());
         let theta = value_diff / self.tableau.entry(old_row, new_basic).clone();
         self.variables[new_basic].value += theta.clone();
         // TODO combine this with the iteration in `correct_nonbasic`.
@@ -295,6 +312,39 @@ mod test {
         assert_eq!(solver.feasible(), false);
         println!("{}", solver.format(&pool));
         // Query again.
+        assert_eq!(solver.feasible(), false);
+    }
+    #[test]
+    fn simple_other() {
+        let mut pool = VariablePool::new();
+        let var_x = pool.declare_variable("x".as_bytes().into(), Sort::Real);
+        let var_y = pool.declare_variable("y".as_bytes().into(), Sort::Real);
+        let x = LinearExpression::variable(var_x.id);
+        let y = LinearExpression::variable(var_y.id);
+        let var_t = pool.declare_variable("t".as_bytes().into(), Sort::Real);
+        let mut solver = LPSolver::default();
+        solver.append_row(var_t.id, x + y);
+        solver.restrict_bounds(
+            var_t.id,
+            Bounds {
+                lower: Some(to_rat(4).into()),
+                upper: Some(to_rat(4).into()),
+            },
+        );
+        solver.restrict_bounds(
+            var_x.id,
+            Bounds {
+                lower: None,
+                upper: Some(to_rat(2).into()),
+            },
+        );
+        solver.restrict_bounds(
+            var_y.id,
+            Bounds {
+                lower: None,
+                upper: Some(to_rat(-2).into()),
+            },
+        );
         assert_eq!(solver.feasible(), false);
     }
 }
