@@ -14,7 +14,7 @@ type AssignmentTrailIndex = usize;
 /// Index into decision_points.
 type DecisionLevel = usize;
 
-pub struct CDCL<'a> {
+pub struct CDCL<'a, TS: TheorySolver> {
     variables: &'a VariablePool,
     // List of clauses including learnt clauses.
     clauses: Vec<Clause>,
@@ -29,6 +29,33 @@ pub struct CDCL<'a> {
     assignment_queue_pointer: AssignmentTrailIndex,
     /// Index into assignment_trail to denote where decisions were taken.
     decision_points: Vec<AssignmentTrailIndex>,
+    theory_solver: TS,
+}
+
+pub trait TheorySolver {
+    fn assign(&mut self, var: VariableID, value: bool);
+    /// Set current decision level. If this is smaller than in the previous call,
+    /// solver has to undo all assignments done in the meantime.
+    fn set_decision_level(&mut self, level: usize);
+    /// Solve the theory part.
+    /// Returns either None (no conflicts in the theory) or a conflict clause,
+    /// i.e. a disjunction of theory predicates that is false in the theory with
+    /// the current assignments.
+    fn solve(&mut self) -> Option<Clause>;
+    fn polarity_indication(&self, predicate: VariableID) -> Option<bool>;
+}
+
+pub struct EmptyTheory;
+
+impl TheorySolver for EmptyTheory {
+    fn assign(&mut self, var: VariableID, value: bool) {}
+    fn set_decision_level(&mut self, level: usize) {}
+    fn solve(&mut self) -> Option<Clause> {
+        None
+    }
+    fn polarity_indication(&self, predicate: VariableID) -> Option<bool> {
+        None
+    }
 }
 
 struct Assignment {
@@ -38,8 +65,8 @@ struct Assignment {
     reason: Option<ClauseIndex>,
 }
 
-impl<'a> CDCL<'a> {
-    pub fn new(pool: &'a VariablePool) -> CDCL<'a> {
+impl<'a, TS: TheorySolver> CDCL<'a, TS> {
+    pub fn new(pool: &'a VariablePool, theory_solver: TS) -> CDCL<'a, TS> {
         CDCL {
             variables: pool,
             clauses: Default::default(),
@@ -48,6 +75,7 @@ impl<'a> CDCL<'a> {
             assignment_trail: Default::default(),
             assignment_queue_pointer: Default::default(),
             decision_points: Default::default(),
+            theory_solver,
         }
     }
     pub fn add_clause(&mut self, c: Clause) -> ClauseIndex {
@@ -62,7 +90,11 @@ impl<'a> CDCL<'a> {
     }
     pub fn solve(&mut self) -> bool {
         loop {
-            if let Some(conflict_clause) = self.propagate() {
+            let mut conflict_clause = self.propagate();
+            // if conflict_clause == None {
+            //     confilct_clause = self.theory_solver.
+            // }
+            if let Some(conflict_clause) = conflict_clause {
                 if self.decision_level() == 0 {
                     return false;
                 }
@@ -85,7 +117,7 @@ impl<'a> CDCL<'a> {
     }
 }
 
-impl Display for CDCL<'_> {
+impl<TS: TheorySolver> Display for CDCL<'_, TS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for clause in &self.clauses {
             writeln!(f, "c {}", format_clause(clause, self.variables))?;
@@ -94,7 +126,7 @@ impl Display for CDCL<'_> {
     }
 }
 
-impl CDCL<'_> {
+impl<TS: TheorySolver> CDCL<'_, TS> {
     fn propagate(&mut self) -> Option<Clause> {
         while self.assignment_queue_pointer < self.assignment_trail.len() {
             let literal = self.assignment_trail[self.assignment_queue_pointer];
@@ -231,6 +263,7 @@ impl CDCL<'_> {
         self.decision_points.truncate(backtrack_level);
         self.assignment_queue_pointer = self.assignment_trail.len();
         assert_eq!(self.decision_level(), backtrack_level);
+        self.theory_solver.set_decision_level(self.decision_level());
     }
 
     fn decide(&mut self, literal: Literal) {
@@ -286,17 +319,17 @@ mod test {
 
     use super::*;
 
-    fn setup(pool: &mut VariablePool) -> (CDCL<'_>, Literal, Literal, Literal) {
+    fn setup(pool: &mut VariablePool) -> (CDCL<'_, EmptyTheory>, Literal, Literal, Literal) {
         let x = Literal::from(pool.declare_variable("x".as_bytes().into(), Sort::Bool));
         let y = Literal::from(pool.declare_variable("y".as_bytes().into(), Sort::Bool));
         let z = Literal::from(pool.declare_variable("z".as_bytes().into(), Sort::Bool));
-        (CDCL::new(pool), x, y, z)
+        (CDCL::new(pool, EmptyTheory), x, y, z)
     }
 
     #[test]
     fn empty() {
         let pool = VariablePool::new();
-        let mut s = CDCL::new(&pool);
+        let mut s = CDCL::new(&pool, EmptyTheory);
         assert!(s.solve());
     }
 
