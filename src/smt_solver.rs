@@ -22,32 +22,21 @@ pub struct SMTSolver {
     fixed_bounds: HashMap<VariableID, Bounds>,
 }
 
-struct LPTheory {
-    pub solver: LPSolver,
+struct LPTheory<'a> {
+    solver: LPSolver,
+    bounds_for_theory_predicates: &'a HashMap<VariableID, (VariableID, RationalWithDelta)>,
 }
-impl LPTheory {
-    pub fn new() -> LPTheory {
+impl<'a> LPTheory<'a> {
+    pub fn new(
+        bounds_for_theory_predicates: &HashMap<VariableID, (VariableID, RationalWithDelta)>,
+    ) -> LPTheory {
         LPTheory {
             solver: LPSolver::default(),
+            bounds_for_theory_predicates,
         }
     }
-    pub fn restrict_bounds(&mut self, var: VariableID, bounds: Bounds) {
-        self.solver.restrict_bounds(var, bounds);
-    }
-    pub fn append_row(
-        &mut self,
-        outer_id: VariableID,
-        data: impl IntoIterator<Item = (VariableID, BigRational)>,
-    ) {
-        self.solver.append_row(outer_id, data);
-    }
-    pub fn feasible(&mut self) -> Option<Clause> {
-        self.solver.feasible();
-        // TODO
-        None
-    }
 }
-impl TheorySolver for LPTheory {
+impl TheorySolver for LPTheory<'_> {
     fn assign(&mut self, var: VariableID, value: bool) {
         todo!()
     }
@@ -91,26 +80,28 @@ impl SMTSolver {
     }
     pub fn check(&mut self) -> Option<bool> {
         // TODO we could keep the state of the lp solver for longer.
-        let mut lp_theory = LPTheory::new();
+        let mut lp_theory = LPTheory::new(&self.bounds_for_theory_predicates);
         for (var, bounds) in &self.fixed_bounds {
-            lp_theory.restrict_bounds(*var, bounds.clone());
+            lp_theory.solver.restrict_bounds(*var, bounds.clone());
         }
         for (basic_var, linear_expr) in &self.linear_constraints {
-            lp_theory.append_row(*basic_var, linear_expr.iter().cloned());
+            lp_theory
+                .solver
+                .append_row(*basic_var, linear_expr.iter().cloned());
         }
         println!("{}", lp_theory.solver.format(&self.variables));
-        if lp_theory.feasible().is_some() {
+        if lp_theory.solver.feasible().is_some() {
             return Some(false);
         }
         if self.bounds_for_theory_predicates.is_empty() && self.clauses.is_empty() {
             return Some(true);
         }
 
-        let mut cdcl = CDCL::new(&self.variables, lp_theory);
-        for clause in &self.clauses {
-            cdcl.add_clause(clause.clone());
-        }
-        cdcl.solve();
+        // let mut cdcl = CDCL::new(&self.variables, lp_theory);
+        // for clause in &self.clauses {
+        //     cdcl.add_clause(clause.clone());
+        // }
+        // cdcl.solve();
 
         //println!("{self}");
         None

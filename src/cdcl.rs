@@ -89,17 +89,19 @@ impl<'a, TS: TheorySolver> CDCL<'a, TS> {
         clause_index
     }
     pub fn solve(&mut self) -> bool {
-        let mut previous_solver_assignment_queue_size = 0;
+        let mut solver_trail_size_calls = vec![0usize];
         loop {
             let mut conflict_clause = self.propagate();
             if conflict_clause == None {
                 assert!(self.assignment_queue_pointer == self.assignment_trail.len());
-                for i in previous_solver_assignment_queue_size..self.assignment_trail.len() {
+                for i in *solver_trail_size_calls.last().unwrap()..self.assignment_trail.len() {
                     let literal = self.assignment_trail[i];
-                    // TODO set decision level
+                    // TODO room for optimization
+                    let level = self.assignment_level(literal.var());
+                    self.theory_solver.set_decision_level(level);
                     self.theory_solver.assign(literal.var(), literal.polarity());
                 }
-                previous_solver_assignment_queue_size = self.assignment_trail.len();
+                solver_trail_size_calls.push(self.assignment_trail.len());
                 conflict_clause = self.theory_solver.solve();
             }
             if let Some(conflict_clause) = conflict_clause {
@@ -108,16 +110,21 @@ impl<'a, TS: TheorySolver> CDCL<'a, TS> {
                 }
                 let (learnt_clause, backtrack_level) = self.analyze_conflict(conflict_clause);
                 self.cancel_until(backtrack_level);
+                self.theory_solver.set_decision_level(backtrack_level);
+                while *solver_trail_size_calls.last().unwrap() > self.assignment_trail.len() {
+                    solver_trail_size_calls.pop();
+                }
                 let literal_to_queue = learnt_clause[0];
                 let reason = self.add_clause(learnt_clause);
                 self.enqueue_assignment(literal_to_queue, Some(reason));
             } else if let Some(var) = self.next_decision_variable() {
-                let value = match self.theory_solver.polarity_indication(var) {
+                // TODO better way to choose variable.
+                let literal = match self.theory_solver.polarity_indication(var) {
                     Some(false) => !Literal::from(var),
                     // TODO Use polarity decision heuristics
                     _ => Literal::from(var),
                 };
-                self.decide(Literal::from(var));
+                self.decide(literal);
             } else {
                 return true;
             }
