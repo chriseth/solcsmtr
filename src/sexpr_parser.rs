@@ -90,7 +90,7 @@ mod test {
     fn parse() {
         let x = "()".to_string();
         assert_eq!(parse_sexpr(b"()"), SExpr::Expr(vec![]));
-        assert_eq!(parse_sexpr(&x.as_bytes()), SExpr::Expr(vec![]));
+        assert_eq!(parse_sexpr(x.as_bytes()), SExpr::Expr(vec![]));
         assert_eq!(parse_sexpr(b"x"), SExpr::Symbol("x".as_bytes()));
         assert_eq!(
             parse_sexpr(b"(x)"),

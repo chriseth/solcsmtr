@@ -1,7 +1,5 @@
 use std::iter;
 
-use num_traits::Zero;
-
 // TODO try u32 for index.
 
 #[derive(Default)]

@@ -87,7 +87,7 @@ impl Bounds {
         } else {
             format!("   {:8}", "")
         };
-        format!("{left} {} {right}", format!("{:^4}", var_name),)
+        format!("{left} {:^4} {right}", var_name)
     }
 }
 
@@ -231,7 +231,7 @@ mod test {
         assert!(d > zero);
         assert!(zero == zero);
         assert!(d == d);
-        assert!(zero.clone() - d.clone() < zero.clone());
-        assert!(zero.clone() + d.clone() == zero.clone() + d.clone());
+        assert!(zero.clone() - d.clone() < zero);
+        assert!(zero.clone() + d.clone() == zero + d);
     }
 }

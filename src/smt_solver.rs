@@ -3,7 +3,6 @@ use std::fmt::{self, Display};
 
 use num_rational::BigRational;
 
-use crate::cdcl::CDCL;
 use crate::linear_expression::LinearExpression;
 use crate::lp_solver::LPSolver;
 use crate::sexpr_parser::SExpr;

@@ -5,7 +5,7 @@ use crate::types::{Clause, Literal};
 use crate::variable_pool::{Sort, VariableID, VariablePool};
 
 pub fn solve_dimacs_file(input: &str, verbose: bool) -> bool {
-    let (vars, clauses) = parse_input(&input);
+    let (vars, clauses) = parse_input(input);
     let mut pool = VariablePool::new();
     for i in 0..vars {
         pool.declare_variable(format!("x{}", i + 1).as_bytes().into(), Sort::Bool);

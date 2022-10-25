@@ -28,11 +28,11 @@ impl<'a> SMTEncoder<'a> {
         fixed_bounds: &'a mut HashMap<VariableID, Bounds>,
     ) -> SMTEncoder<'a> {
         SMTEncoder {
-            variables: variables,
-            linear_constraints: linear_constraints,
-            clauses: clauses,
-            bounds_for_theory_predicates: bounds_for_theory_predicates,
-            fixed_bounds: fixed_bounds,
+            variables,
+            linear_constraints,
+            clauses,
+            bounds_for_theory_predicates,
+            fixed_bounds,
         }
     }
 

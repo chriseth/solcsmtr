@@ -131,6 +131,6 @@ pub mod test {
         assert_eq!(0 * x.clone(), Default::default());
         assert_eq!(x.clone() - x.clone(), Default::default());
         assert_eq!(3 * x.clone() + y.clone(), y.clone() + 3 * x.clone());
-        assert_eq!(3 * (x.clone() + y.clone()), 3 * y.clone() + 3 * x.clone());
+        assert_eq!(3 * (x.clone() + y.clone()), 3 * y + 3 * x);
     }
 }

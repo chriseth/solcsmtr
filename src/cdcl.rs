@@ -71,14 +71,12 @@ impl<'a> CDCL<'a> {
                 let literal_to_queue = learnt_clause[0];
                 let reason = self.add_clause(learnt_clause);
                 self.enqueue_assignment(literal_to_queue, Some(reason));
+            } else if let Some(var) = self.next_decision_variable() {
+                self.decision_points.push(self.assignment_trail.len());
+                // TODO Use polarity decision heuristics
+                self.enqueue_assignment(Literal::from(var), None);
             } else {
-                if let Some(var) = self.next_decision_variable() {
-                    self.decision_points.push(self.assignment_trail.len());
-                    // TODO Use polarity decision heuristics
-                    self.enqueue_assignment(Literal::from(var), None);
-                } else {
-                    return true;
-                }
+                return true;
             }
         }
     }
@@ -284,8 +282,8 @@ mod test {
 
     #[test]
     fn empty() {
-        let mut pool = VariablePool::new();
-        let mut s = CDCL::new(&mut pool);
+        let pool = VariablePool::new();
+        let mut s = CDCL::new(&pool);
         assert!(s.solve());
     }
 
