@@ -56,6 +56,10 @@ impl<'a> SMTEncoder<'a> {
                     self.add_assertion(a);
                 }
             }
+            (b"not", 1) => {
+                let lit = self.parse_into_literal(&args[0]);
+                self.add_clause(vec![!lit]);
+            }
             (b"=" | b"<=", 2) => {
                 if op == b"=" && self.determine_sort(&args[0]) == Sort::Bool {
                     let args = self.parse_into_literals(args);
@@ -226,6 +230,7 @@ impl<'a> SMTEncoder<'a> {
         } else {
             match e.as_subexpr()[0].as_symbol() {
                 b"-" | b"+" | b"*" => Sort::Real,
+                b"not" | b"or" | b"and" => Sort::Bool,
                 _ => panic!("Could not determine sort of arguments to {}", e),
             }
         }

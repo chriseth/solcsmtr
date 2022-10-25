@@ -38,19 +38,21 @@ impl<'a> LPTheory<'a> {
 }
 impl TheorySolver for LPTheory<'_> {
     fn assign(&mut self, var: VariableID, value: bool) {
-        todo!()
+        //todo!()
     }
 
     fn set_decision_level(&mut self, level: usize) {
-        todo!()
+
+        //todo!()
     }
 
     fn solve(&mut self) -> Option<Clause> {
-        todo!()
+        None
+//        todo!()
     }
 
     fn polarity_indication(&self, predicate: VariableID) -> Option<bool> {
-        todo!()
+        None//todo!()
     }
 }
 
@@ -97,14 +99,11 @@ impl SMTSolver {
             return Some(true);
         }
 
-        // let mut cdcl = CDCL::new(&self.variables, lp_theory);
-        // for clause in &self.clauses {
-        //     cdcl.add_clause(clause.clone());
-        // }
-        // cdcl.solve();
-
-        //println!("{self}");
-        None
+        let mut cdcl = CDCL::new(&self.variables, lp_theory);
+        for clause in &self.clauses {
+            cdcl.add_clause(clause.clone());
+        }
+        Some(cdcl.solve())
     }
 }
 
@@ -163,6 +162,9 @@ mod test {
         s.declare_variable("x".as_bytes().into(), Sort::Real);
         s.declare_variable("y".as_bytes().into(), Sort::Real);
         s.declare_variable("z".as_bytes().into(), Sort::Real);
+        s.declare_variable("a".as_bytes().into(), Sort::Bool);
+        s.declare_variable("b".as_bytes().into(), Sort::Bool);
+        s.declare_variable("c".as_bytes().into(), Sort::Bool);
         s
     }
 
@@ -193,6 +195,17 @@ mod test {
         s.add_assertion(&parse_sexpr(b"(<= x 2)"));
         assert!(s.check() == Some(true));
         s.add_assertion(&parse_sexpr(b"(<= 1 y)"));
+        println!("{}", s);
+        assert!(s.check() == Some(false));
+    }
+    #[test]
+    fn only_boolean() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(or (not a) b)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(not b)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(a)"));
         println!("{}", s);
         assert!(s.check() == Some(false));
     }
