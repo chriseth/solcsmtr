@@ -1,6 +1,6 @@
 use std::cmp::max;
 
-use crate::cdcl::{CDCL, EmptyTheory};
+use crate::cdcl::{EmptyTheory, CDCL};
 use crate::types::{Clause, Literal};
 use crate::variable_pool::{Sort, VariableID, VariablePool};
 

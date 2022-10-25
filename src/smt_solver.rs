@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 
 use num_rational::BigRational;
 
+use crate::cdcl::{TheorySolver, CDCL};
 use crate::linear_expression::LinearExpression;
 use crate::lp_solver::LPSolver;
 use crate::sexpr_parser::SExpr;
@@ -19,6 +20,49 @@ pub struct SMTSolver {
     /// Real variable and its upper bound for each theory predicate, if taken positively.
     bounds_for_theory_predicates: HashMap<VariableID, (VariableID, RationalWithDelta)>,
     fixed_bounds: HashMap<VariableID, Bounds>,
+}
+
+struct LPTheory {
+    pub solver: LPSolver,
+}
+impl LPTheory {
+    pub fn new() -> LPTheory {
+        LPTheory {
+            solver: LPSolver::default(),
+        }
+    }
+    pub fn restrict_bounds(&mut self, var: VariableID, bounds: Bounds) {
+        self.solver.restrict_bounds(var, bounds);
+    }
+    pub fn append_row(
+        &mut self,
+        outer_id: VariableID,
+        data: impl IntoIterator<Item = (VariableID, BigRational)>,
+    ) {
+        self.solver.append_row(outer_id, data);
+    }
+    pub fn feasible(&mut self) -> Option<Clause> {
+        self.solver.feasible();
+        // TODO
+        None
+    }
+}
+impl TheorySolver for LPTheory {
+    fn assign(&mut self, var: VariableID, value: bool) {
+        todo!()
+    }
+
+    fn set_decision_level(&mut self, level: usize) {
+        todo!()
+    }
+
+    fn solve(&mut self) -> Option<Clause> {
+        todo!()
+    }
+
+    fn polarity_indication(&self, predicate: VariableID) -> Option<bool> {
+        todo!()
+    }
 }
 
 impl SMTSolver {
@@ -47,22 +91,26 @@ impl SMTSolver {
     }
     pub fn check(&mut self) -> Option<bool> {
         // TODO we could keep the state of the lp solver for longer.
-        let mut lpsolver = LPSolver::default();
+        let mut lp_theory = LPTheory::new();
         for (var, bounds) in &self.fixed_bounds {
-            lpsolver.restrict_bounds(*var, bounds.clone());
+            lp_theory.restrict_bounds(*var, bounds.clone());
         }
         for (basic_var, linear_expr) in &self.linear_constraints {
-            lpsolver.append_row(*basic_var, linear_expr.iter().cloned());
+            lp_theory.append_row(*basic_var, linear_expr.iter().cloned());
         }
-        println!("{}", lpsolver.format(&self.variables));
-        if lpsolver.feasible().is_some() {
+        println!("{}", lp_theory.solver.format(&self.variables));
+        if lp_theory.feasible().is_some() {
             return Some(false);
         }
         if self.bounds_for_theory_predicates.is_empty() && self.clauses.is_empty() {
             return Some(true);
         }
 
-        //let mut cdcl = CDCL::new(&self.variables);
+        let mut cdcl = CDCL::new(&self.variables, lp_theory);
+        for clause in &self.clauses {
+            cdcl.add_clause(clause.clone());
+        }
+        cdcl.solve();
 
         //println!("{self}");
         None

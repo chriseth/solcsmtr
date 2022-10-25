@@ -89,11 +89,19 @@ impl<'a, TS: TheorySolver> CDCL<'a, TS> {
         clause_index
     }
     pub fn solve(&mut self) -> bool {
+        let mut previous_solver_assignment_queue_size = 0;
         loop {
             let mut conflict_clause = self.propagate();
-            // if conflict_clause == None {
-            //     confilct_clause = self.theory_solver.
-            // }
+            if conflict_clause == None {
+                assert!(self.assignment_queue_pointer == self.assignment_trail.len());
+                for i in previous_solver_assignment_queue_size..self.assignment_trail.len() {
+                    let literal = self.assignment_trail[i];
+                    // TODO set decision level
+                    self.theory_solver.assign(literal.var(), literal.polarity());
+                }
+                previous_solver_assignment_queue_size = self.assignment_trail.len();
+                conflict_clause = self.theory_solver.solve();
+            }
             if let Some(conflict_clause) = conflict_clause {
                 if self.decision_level() == 0 {
                     return false;
@@ -104,8 +112,11 @@ impl<'a, TS: TheorySolver> CDCL<'a, TS> {
                 let reason = self.add_clause(learnt_clause);
                 self.enqueue_assignment(literal_to_queue, Some(reason));
             } else if let Some(var) = self.next_decision_variable() {
-                // TODO Use polarity decision heuristics
-                // TODO check that it at least is a boolean variable.
+                let value = match self.theory_solver.polarity_indication(var) {
+                    Some(false) => !Literal::from(var),
+                    // TODO Use polarity decision heuristics
+                    _ => Literal::from(var),
+                };
                 self.decide(Literal::from(var));
             } else {
                 return true;
