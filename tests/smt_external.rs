@@ -2,8 +2,8 @@ use std::{fs, io::BufWriter, path::Path};
 
 use solcsmtr::smt_smtlib::handle_commands;
 
-//#[test]
-//#[ignore]
+#[test]
+#[ignore]
 fn smt_external_tests() {
     let base_path = Path::new(&std::env::var("SOLCSMTR_BENCHMARKS").unwrap()).join("smt");
     let mut tests_run = 0;

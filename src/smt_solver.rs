@@ -52,6 +52,7 @@ impl TheorySolver for LPTheory<'_> {
     fn assign(&mut self, var: VariableID, value: bool) {
         if let Some((rational_var, upper_bound)) = self.bounds_for_theory_predicates.get(&var) {
             if let Some((old_bounds, old_reasons)) = if value {
+                println!("Restricting {}", *rational_var);
                 self.solver.restrict_bounds_with_reason(
                     *rational_var,
                     Bounds {
@@ -61,10 +62,12 @@ impl TheorySolver for LPTheory<'_> {
                     (None, Some(!Literal::from(var))),
                 )
             } else {
+                println!("Restricting negated {}", *rational_var);
+                println!("{} >= {}",self.pool.name(*rational_var), upper_bound.clone() - RationalWithDelta::delta());
                 self.solver.restrict_bounds_with_reason(
                     *rational_var,
                     Bounds {
-                        lower: Some(upper_bound.clone() - RationalWithDelta::delta()),
+                        lower: Some(upper_bound.clone() + RationalWithDelta::delta()),
                         upper: None,
                     },
                     (Some(!Literal::from(var)), None),
@@ -82,15 +85,22 @@ impl TheorySolver for LPTheory<'_> {
             println!("-> increment");
             // TODO optimization: store "previous good values",
             // but there was also another (better) technique that re-computed them.
-        } else {
+        } else if trail_size < self.trail_size {
             while let Some((stored_size, ..)) = self.stored_bounds.iter().last() {
-                if *stored_size <= self.trail_size {
+                if *stored_size <= trail_size {
                     break;
                 }
                 let (_, var, bounds, reasons) = self.stored_bounds.pop().unwrap();
+                println!("undoing {}", var);
                 self.solver.set_bounds_with_reason(var, bounds, reasons)
             }
+            println!(
+                "Solver after resetting trail size:\n{}------------------",
+                &self.solver.format(&self.pool)
+            );
+    
         }
+        self.trail_size = trail_size;
     }
 
     fn solve(&mut self) -> Option<Clause> {
@@ -131,6 +141,7 @@ impl SMTSolver {
         todo!();
     }
     pub fn check(&mut self) -> Option<bool> {
+        println!("============ check ================");
         // TODO we could keep the state of the lp solver for longer.
         let mut lp_theory = LPTheory::new(&self.bounds_for_theory_predicates, &self.variables);
         for (var, bounds) in &self.fixed_bounds {
