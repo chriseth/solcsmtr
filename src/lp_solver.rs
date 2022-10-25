@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use num_rational::BigRational;
 use num_traits::{One, Signed, Zero};
@@ -28,9 +28,30 @@ pub struct LPSolver {
 struct Variable {
     value: RationalWithDelta,
     bounds: Bounds,
+    reasons: (Option<VariableID>, Option<VariableID>),
 }
 
 impl Variable {
+    pub fn restrict_bounds_with_reason(
+        &mut self,
+        bounds: Bounds,
+        reasons: (Option<VariableID>, Option<VariableID>),
+    ) -> bool {
+        let old_bounds = self.bounds.clone();
+        self.bounds.combine(bounds);
+        if old_bounds != self.bounds {
+            if old_bounds.lower != self.bounds.lower {
+                self.reasons.0 = reasons.0;
+            }
+            if old_bounds.upper != self.bounds.upper {
+                self.reasons.1 = reasons.1;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn can_be_increased(&self) -> bool {
         if let Some(u) = &self.bounds.upper {
             self.value < *u
@@ -66,6 +87,7 @@ impl Variable {
     }
 
     pub fn format(&self, name: &str) -> String {
+        // TODO format reasons
         use colored::Colorize;
         let s = format!("{} := {}", self.bounds.format(name), self.value);
         if self.needs_update().is_some() {
@@ -99,33 +121,43 @@ impl LPSolver {
         self.basic_variable_to_row.insert(basic_id, row);
     }
     pub fn restrict_bounds(&mut self, outer_id: VariableID, bounds: Bounds) {
-        self.feasible = None;
+        self.restrict_bounds_with_reason(outer_id, bounds, (None, None))
+    }
+    pub fn restrict_bounds_with_reason(
+        &mut self,
+        outer_id: VariableID,
+        bounds: Bounds,
+        reasons: (Option<VariableID>, Option<VariableID>),
+    ) {
         let var_id = self.add_outer_variable(outer_id);
-        self.variables[var_id].bounds.combine(bounds);
+        if self.variables[var_id].restrict_bounds_with_reason(bounds, reasons) {
+            self.feasible = None;
+        }
     }
 
-    pub fn feasible(&mut self) -> bool {
-        if self.feasible.is_some() {
-            return self.feasible.unwrap();
+    /// Returns None if feasible, otherwise returns a set of reasons.
+    pub fn feasible(&mut self) -> Option<HashSet<VariableID>> {
+        if self.feasible == Some(true) {
+            return None;
+            // TODO do we want to use a cached infeasible result?
         }
-        if !self.correct_nonbasic() {
+        if let Some(reasons) = self.correct_nonbasic() {
             self.feasible = Some(false);
+            return Some(reasons);
         } else {
             while let Some((cbv, diff)) = self.fix_first_conflicting_basic_variable() {
                 if let Some(replacement) = self.first_replacement_var(cbv, diff.is_positive()) {
                     self.pivot_and_update(cbv, diff, replacement);
                 } else {
                     // Undo correction of basic vaiable.
-                    self.variables[cbv].value -= diff;
+                    self.variables[cbv].value -= diff.clone();
+
                     self.feasible = Some(false);
-                    break;
+                    return Some(self.reasons_for_unsat(cbv, diff.is_positive()));
                 }
             }
-            if self.feasible.is_none() {
-                self.feasible = Some(true)
-            }
         }
-        self.feasible.unwrap()
+        None
     }
 
     pub fn format(&self, pool: &VariablePool) -> String {
@@ -175,14 +207,17 @@ impl LPSolver {
             self.variables.len() - 1
         })
     }
-    fn correct_nonbasic(&mut self) -> bool {
+    /// Try to change all nonbasic variables to be in bounds.
+    /// If this is not possible (because one variable has conflicting bounds),
+    /// returns the set of reasons for that variable.
+    fn correct_nonbasic(&mut self) -> Option<HashSet<VariableID>> {
         // TODO mark "dirty" nonbasic variables at the point where they are modified.
         // TODO could we actually split basic and non-basic variables
         // into two vectors?
         for id in 0..self.variables.len() {
             let v = &mut self.variables[id];
             if v.bounds.are_conflicting() {
-                return false;
+                return Some(v.reasons.0.into_iter().chain(v.reasons.1).collect());
             }
             if self.basic_variable_to_row.contains_key(&id) {
                 continue;
@@ -194,7 +229,7 @@ impl LPSolver {
                 }
             }
         }
-        true
+        None
     }
     /// Finds the first conflicting basic variable, updates it and returns its ID and
     /// difference after the update.
@@ -220,6 +255,27 @@ impl LPSolver {
             }
         }
         None
+    }
+    fn reasons_for_unsat(&self, basic: usize, increasing: bool) -> HashSet<VariableID> {
+        let mut reasons = HashSet::new();
+        if increasing {
+            reasons.extend(self.variables[basic].reasons.0.iter());
+        } else {
+            reasons.extend(self.variables[basic].reasons.1.iter());
+        }
+        for (_, column, factor) in self.tableau.iterate_row(self.basic_variable_to_row[&basic]) {
+            if column == basic {
+                continue;
+            }
+            assert!(!factor.is_zero());
+            let check_upper = factor.is_negative() ^ increasing;
+            if check_upper && !self.variables[column].can_be_increased() {
+                reasons.extend(self.variables[column].reasons.1);
+            } else if !check_upper && !self.variables[column].can_be_decreased() {
+                reasons.extend(self.variables[column].reasons.0);
+            }
+        }
+        reasons
     }
 
     fn pivot_and_update(
@@ -275,7 +331,7 @@ mod test {
     #[test]
     fn empty() {
         let mut solver = LPSolver::default();
-        assert_eq!(solver.feasible(), true);
+        assert_eq!(solver.feasible(), None);
     }
     #[test]
     fn simple() {
@@ -287,32 +343,36 @@ mod test {
         let var_t = pool.declare_variable("t".as_bytes().into(), Sort::Real);
         let mut solver = LPSolver::default();
         solver.append_row(var_t.id, 2 * x + y);
-        solver.restrict_bounds(
+        solver.restrict_bounds_with_reason(
             var_t.id,
             Bounds {
                 lower: Some(to_rat(0).into()),
                 upper: Some(to_rat(0).into()),
             },
+            (Some(11), Some(12)),
         );
-        solver.restrict_bounds(
+        solver.restrict_bounds_with_reason(
             var_x.id,
             Bounds {
                 lower: Some(to_rat(2).into()),
                 upper: None,
             },
+            (Some(13), Some(14)),
         );
-        assert_eq!(solver.feasible(), true);
-        solver.restrict_bounds(
+        assert_eq!(solver.feasible(), None);
+        solver.restrict_bounds_with_reason(
             var_y.id,
             Bounds {
                 lower: Some((to_rat(2)).into()),
                 upper: None,
             },
+            (Some(15), Some(16)),
         );
-        assert_eq!(solver.feasible(), false);
+        println!("{}", solver.format(&pool));
+        assert_eq!(solver.feasible(), Some([12, 13, 15].into()));
         println!("{}", solver.format(&pool));
         // Query again.
-        assert_eq!(solver.feasible(), false);
+        assert_eq!(solver.feasible(), Some([12, 13, 15].into()));
     }
     #[test]
     fn simple_other() {
@@ -324,27 +384,31 @@ mod test {
         let var_t = pool.declare_variable("t".as_bytes().into(), Sort::Real);
         let mut solver = LPSolver::default();
         solver.append_row(var_t.id, x + y);
-        solver.restrict_bounds(
+        solver.restrict_bounds_with_reason(
             var_t.id,
             Bounds {
                 lower: Some(to_rat(4).into()),
                 upper: Some(to_rat(4).into()),
             },
+            (Some(11), Some(12)),
         );
-        solver.restrict_bounds(
+        solver.restrict_bounds_with_reason(
             var_x.id,
             Bounds {
                 lower: None,
                 upper: Some(to_rat(2).into()),
             },
+            (Some(13), Some(14)),
         );
-        solver.restrict_bounds(
+        solver.restrict_bounds_with_reason(
             var_y.id,
             Bounds {
                 lower: None,
                 upper: Some(to_rat(-2).into()),
             },
+            (Some(15), Some(16)),
         );
-        assert_eq!(solver.feasible(), false);
+        println!("{}", solver.format(&pool));
+        assert_eq!(solver.feasible(), Some([11, 14, 16].into()));
     }
 }

@@ -56,7 +56,7 @@ impl SMTSolver {
             lpsolver.append_row(*basic_var, linear_expr.iter().cloned());
         }
         println!("{}", lpsolver.format(&self.variables));
-        if !lpsolver.feasible() {
+        if lpsolver.feasible().is_some() {
             return Some(false);
         }
         if self.bounds_for_theory_predicates.is_empty() && self.clauses.is_empty() {
