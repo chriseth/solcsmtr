@@ -34,13 +34,12 @@ pub struct CDCL<'a, TS: TheorySolver> {
 
 pub trait TheorySolver {
     fn assign(&mut self, var: VariableID, value: bool);
-    /// Set current decision level. If this is smaller than in the previous call,
+    /// Set current assignment trail size. If this is smaller than in the previous call,
     /// solver has to undo all assignments done in the meantime.
-    fn set_decision_level(&mut self, level: usize);
+    fn set_trail_size(&mut self, trail_size: usize);
     /// Solve the theory part.
     /// Returns either None (no conflicts in the theory) or a conflict clause,
-    /// i.e. a disjunction of theory predicates that is false in the theory with
-    /// the current assignments.
+    /// i.e. a clase C such that !C causes a conflict in the theory.
     fn solve(&mut self) -> Option<Clause>;
     fn polarity_indication(&self, predicate: VariableID) -> Option<bool>;
 }
@@ -49,7 +48,7 @@ pub struct EmptyTheory;
 
 impl TheorySolver for EmptyTheory {
     fn assign(&mut self, var: VariableID, value: bool) {}
-    fn set_decision_level(&mut self, level: usize) {}
+    fn set_trail_size(&mut self, trail_size: usize) {}
     fn solve(&mut self) -> Option<Clause> {
         None
     }
@@ -96,9 +95,7 @@ impl<'a, TS: TheorySolver> CDCL<'a, TS> {
                 assert!(self.assignment_queue_pointer == self.assignment_trail.len());
                 for i in *solver_trail_size_calls.last().unwrap()..self.assignment_trail.len() {
                     let literal = self.assignment_trail[i];
-                    // TODO room for optimization
-                    let level = self.assignment_level(literal.var());
-                    self.theory_solver.set_decision_level(level);
+                    self.theory_solver.set_trail_size(i);
                     self.theory_solver.assign(literal.var(), literal.polarity());
                 }
                 solver_trail_size_calls.push(self.assignment_trail.len());
@@ -110,7 +107,8 @@ impl<'a, TS: TheorySolver> CDCL<'a, TS> {
                 }
                 let (learnt_clause, backtrack_level) = self.analyze_conflict(conflict_clause);
                 self.cancel_until(backtrack_level);
-                self.theory_solver.set_decision_level(backtrack_level);
+                self.theory_solver
+                    .set_trail_size(self.assignment_trail.len());
                 while *solver_trail_size_calls.last().unwrap() > self.assignment_trail.len() {
                     solver_trail_size_calls.pop();
                 }
@@ -281,7 +279,7 @@ impl<TS: TheorySolver> CDCL<'_, TS> {
         self.decision_points.truncate(backtrack_level);
         self.assignment_queue_pointer = self.assignment_trail.len();
         assert_eq!(self.decision_level(), backtrack_level);
-        self.theory_solver.set_decision_level(self.decision_level());
+        self.theory_solver.set_trail_size(self.decision_level());
     }
 
     fn decide(&mut self, literal: Literal) {

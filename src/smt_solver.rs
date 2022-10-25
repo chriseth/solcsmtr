@@ -24,35 +24,85 @@ pub struct SMTSolver {
 
 struct LPTheory<'a> {
     solver: LPSolver,
+    pool: &'a VariablePool,
     bounds_for_theory_predicates: &'a HashMap<VariableID, (VariableID, RationalWithDelta)>,
+    trail_size: usize,
+    stored_bounds: Vec<(
+        usize,
+        VariableID,
+        Bounds,
+        (Option<Literal>, Option<Literal>),
+    )>,
 }
 impl<'a> LPTheory<'a> {
     pub fn new(
-        bounds_for_theory_predicates: &HashMap<VariableID, (VariableID, RationalWithDelta)>,
-    ) -> LPTheory {
+        bounds_for_theory_predicates: &'a HashMap<VariableID, (VariableID, RationalWithDelta)>,
+        pool: &'a VariablePool,
+    ) -> LPTheory<'a> {
         LPTheory {
             solver: LPSolver::default(),
+            pool,
             bounds_for_theory_predicates,
+            trail_size: 0,
+            stored_bounds: vec![],
         }
     }
 }
 impl TheorySolver for LPTheory<'_> {
     fn assign(&mut self, var: VariableID, value: bool) {
-        //todo!()
+        if let Some((rational_var, upper_bound)) = self.bounds_for_theory_predicates.get(&var) {
+            if let Some((old_bounds, old_reasons)) = if value {
+                self.solver.restrict_bounds_with_reason(
+                    *rational_var,
+                    Bounds {
+                        lower: None,
+                        upper: Some(upper_bound.clone()),
+                    },
+                    (None, Some(!Literal::from(var))),
+                )
+            } else {
+                self.solver.restrict_bounds_with_reason(
+                    *rational_var,
+                    Bounds {
+                        lower: Some(upper_bound.clone() - RationalWithDelta::delta()),
+                        upper: None,
+                    },
+                    (Some(!Literal::from(var)), None),
+                )
+            } {
+                self.stored_bounds
+                    .push((self.trail_size, *rational_var, old_bounds, old_reasons));
+            }
+        }
     }
 
-    fn set_decision_level(&mut self, level: usize) {
-
-        //todo!()
+    fn set_trail_size(&mut self, trail_size: usize) {
+        println!("CDCL sets assignment trail size to {trail_size}");
+        if trail_size > self.trail_size {
+            println!("-> increment");
+            // TODO optimization: store "previous good values",
+            // but there was also another (better) technique that re-computed them.
+        } else {
+            while let Some((stored_size, ..)) = self.stored_bounds.iter().last() {
+                if *stored_size <= self.trail_size {
+                    break;
+                }
+                let (_, var, bounds, reasons) = self.stored_bounds.pop().unwrap();
+                self.solver.set_bounds_with_reason(var, bounds, reasons)
+            }
+        }
     }
 
     fn solve(&mut self) -> Option<Clause> {
-        None
-//        todo!()
+        println!(
+            "CDCL asks us to run solver:\n{}------------------",
+            &self.solver.format(&self.pool)
+        );
+        self.solver.feasible()
     }
 
     fn polarity_indication(&self, predicate: VariableID) -> Option<bool> {
-        None//todo!()
+        None //todo!()
     }
 }
 
@@ -82,7 +132,7 @@ impl SMTSolver {
     }
     pub fn check(&mut self) -> Option<bool> {
         // TODO we could keep the state of the lp solver for longer.
-        let mut lp_theory = LPTheory::new(&self.bounds_for_theory_predicates);
+        let mut lp_theory = LPTheory::new(&self.bounds_for_theory_predicates, &self.variables);
         for (var, bounds) in &self.fixed_bounds {
             lp_theory.solver.restrict_bounds(*var, bounds.clone());
         }
@@ -206,6 +256,17 @@ mod test {
         s.add_assertion(&parse_sexpr(b"(not b)"));
         assert!(s.check() == Some(true));
         s.add_assertion(&parse_sexpr(b"(a)"));
+        println!("{}", s);
+        assert!(s.check() == Some(false));
+    }
+    #[test]
+    fn simple_mixed() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(or (<= x 7) (> y 2))"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(= x 8)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(= y 2)"));
         println!("{}", s);
         assert!(s.check() == Some(false));
     }

@@ -28,28 +28,38 @@ pub struct LPSolver {
 struct Variable {
     value: RationalWithDelta,
     bounds: Bounds,
-    reasons: (Option<VariableID>, Option<VariableID>),
+    reasons: (Option<Literal>, Option<Literal>),
 }
 
 impl Variable {
     pub fn restrict_bounds_with_reason(
         &mut self,
         bounds: Bounds,
-        reasons: (Option<VariableID>, Option<VariableID>),
-    ) -> bool {
+        reasons: (Option<Literal>, Option<Literal>),
+    ) -> Option<(Bounds, (Option<Literal>, Option<Literal>))> {
         let old_bounds = self.bounds.clone();
         self.bounds.combine(bounds);
         if old_bounds != self.bounds {
+            let old_reasons = self.reasons.clone();
             if old_bounds.lower != self.bounds.lower {
                 self.reasons.0 = reasons.0;
             }
             if old_bounds.upper != self.bounds.upper {
                 self.reasons.1 = reasons.1;
             }
-            true
+            Some((old_bounds, old_reasons))
         } else {
-            false
+            None
         }
+    }
+
+    pub fn set_bounds_with_reason(
+        &mut self,
+        bounds: Bounds,
+        reasons: (Option<Literal>, Option<Literal>),
+    ) {
+        self.bounds = bounds;
+        self.reasons = reasons;
     }
 
     pub fn can_be_increased(&self) -> bool {
@@ -121,22 +131,40 @@ impl LPSolver {
         self.basic_variable_to_row.insert(basic_id, row);
     }
     pub fn restrict_bounds(&mut self, outer_id: VariableID, bounds: Bounds) {
-        self.restrict_bounds_with_reason(outer_id, bounds, (None, None))
+        self.restrict_bounds_with_reason(outer_id, bounds, (None, None));
     }
+    /// Restrict bounds and provide reasons.
+    /// Reasons must be unique literals that are a consequence of a violation of the bound.
+    /// Returns the previous values if the new bounds are stricter.
     pub fn restrict_bounds_with_reason(
         &mut self,
         outer_id: VariableID,
         bounds: Bounds,
-        reasons: (Option<VariableID>, Option<VariableID>),
-    ) {
+        reasons: (Option<Literal>, Option<Literal>),
+    ) -> Option<(Bounds, (Option<Literal>, Option<Literal>))> {
         let var_id = self.add_outer_variable(outer_id);
-        if self.variables[var_id].restrict_bounds_with_reason(bounds, reasons) {
+        let old_values = self.variables[var_id].restrict_bounds_with_reason(bounds, reasons);
+        if old_values.is_some() {
             self.feasible = None;
         }
+        old_values
+    }
+
+    /// Set bounds and provide reasons, replacing previous values.
+    /// Reasons must be unique literals that are a consequence of a violation of the bound.
+    pub fn set_bounds_with_reason(
+        &mut self,
+        outer_id: VariableID,
+        bounds: Bounds,
+        reasons: (Option<Literal>, Option<Literal>),
+    ) {
+        let var_id = self.add_outer_variable(outer_id);
+        self.variables[var_id].set_bounds_with_reason(bounds, reasons);
+        self.feasible = None;
     }
 
     /// Returns None if feasible, otherwise returns a set of reasons.
-    pub fn feasible(&mut self) -> Option<HashSet<VariableID>> {
+    pub fn feasible(&mut self) -> Option<Clause> {
         if self.feasible == Some(true) {
             return None;
             // TODO do we want to use a cached infeasible result?
@@ -210,7 +238,7 @@ impl LPSolver {
     /// Try to change all nonbasic variables to be in bounds.
     /// If this is not possible (because one variable has conflicting bounds),
     /// returns the set of reasons for that variable.
-    fn correct_nonbasic(&mut self) -> Option<HashSet<VariableID>> {
+    fn correct_nonbasic(&mut self) -> Option<Clause> {
         // TODO mark "dirty" nonbasic variables at the point where they are modified.
         // TODO could we actually split basic and non-basic variables
         // into two vectors?
@@ -256,8 +284,8 @@ impl LPSolver {
         }
         None
     }
-    fn reasons_for_unsat(&self, basic: usize, increasing: bool) -> HashSet<VariableID> {
-        let mut reasons = HashSet::new();
+    fn reasons_for_unsat(&self, basic: usize, increasing: bool) -> Clause {
+        let mut reasons = vec![];
         if increasing {
             reasons.extend(self.variables[basic].reasons.0.iter());
         } else {
@@ -327,6 +355,13 @@ impl LPSolver {
 mod test {
     use crate::{linear_expression::LinearExpression, variable_pool::Sort};
 
+    fn expect_reason(got: Option<Clause>, mut expected: Vec<u32>) {
+        let mut x: Vec<_> = got.unwrap().iter().map(|l| l.var() as u32).collect();
+        x.sort();
+        expected.sort();
+        assert_eq!(x, expected);
+    }
+
     use super::*;
     #[test]
     fn empty() {
@@ -349,7 +384,7 @@ mod test {
                 lower: Some(to_rat(0).into()),
                 upper: Some(to_rat(0).into()),
             },
-            (Some(11), Some(12)),
+            (Some(11.into()), Some(12.into())),
         );
         solver.restrict_bounds_with_reason(
             var_x.id,
@@ -357,7 +392,7 @@ mod test {
                 lower: Some(to_rat(2).into()),
                 upper: None,
             },
-            (Some(13), Some(14)),
+            (Some(13.into()), Some(14.into())),
         );
         assert_eq!(solver.feasible(), None);
         solver.restrict_bounds_with_reason(
@@ -366,13 +401,13 @@ mod test {
                 lower: Some((to_rat(2)).into()),
                 upper: None,
             },
-            (Some(15), Some(16)),
+            (Some(15.into()), Some(16.into())),
         );
         println!("{}", solver.format(&pool));
-        assert_eq!(solver.feasible(), Some([12, 13, 15].into()));
+        expect_reason(solver.feasible(), vec![12, 13, 15]);
         println!("{}", solver.format(&pool));
         // Query again.
-        assert_eq!(solver.feasible(), Some([12, 13, 15].into()));
+        expect_reason(solver.feasible(), vec![12, 13, 15]);
     }
     #[test]
     fn simple_other() {
@@ -390,7 +425,7 @@ mod test {
                 lower: Some(to_rat(4).into()),
                 upper: Some(to_rat(4).into()),
             },
-            (Some(11), Some(12)),
+            (Some(11.into()), Some(12.into())),
         );
         solver.restrict_bounds_with_reason(
             var_x.id,
@@ -398,7 +433,7 @@ mod test {
                 lower: None,
                 upper: Some(to_rat(2).into()),
             },
-            (Some(13), Some(14)),
+            (Some(13.into()), Some(14.into())),
         );
         solver.restrict_bounds_with_reason(
             var_y.id,
@@ -406,9 +441,9 @@ mod test {
                 lower: None,
                 upper: Some(to_rat(-2).into()),
             },
-            (Some(15), Some(16)),
+            (Some(15.into()), Some(16.into())),
         );
         println!("{}", solver.format(&pool));
-        assert_eq!(solver.feasible(), Some([11, 14, 16].into()));
+        expect_reason(solver.feasible(), vec![11, 14, 16]);
     }
 }
