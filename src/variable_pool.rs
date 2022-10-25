@@ -48,8 +48,12 @@ impl VariablePool {
     pub fn variable(&self, name: &[u8]) -> Variable {
         self.variables[name]
     }
-    pub fn all_ids(&self) -> impl Iterator<Item = VariableID> {
-        (1..self.variables.len()).map(|v| v as VariableID)
+    // Enumerates all IDs of boolean variables, in a random order.
+    pub fn all_boolean_ids(&'_ self) -> impl Iterator<Item = VariableID> + '_ {
+        self.variables
+            .values()
+            .filter(|v| v.sort == Sort::Bool)
+            .map(|v| v.id)
     }
     pub fn name(&self, var: VariableID) -> &str {
         std::str::from_utf8(&self.variable_names[var as usize]).unwrap()

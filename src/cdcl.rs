@@ -72,9 +72,9 @@ impl<'a> CDCL<'a> {
                 let reason = self.add_clause(learnt_clause);
                 self.enqueue_assignment(literal_to_queue, Some(reason));
             } else if let Some(var) = self.next_decision_variable() {
-                self.decision_points.push(self.assignment_trail.len());
                 // TODO Use polarity decision heuristics
-                self.enqueue_assignment(Literal::from(var), None);
+                // TODO check that it at least is a boolean variable.
+                self.decide(Literal::from(var));
             } else {
                 return true;
             }
@@ -180,7 +180,7 @@ impl CDCL<'_> {
             for literal in conflict_clause {
                 if Some(literal) != resolving_literal && !seen_variables.contains(&literal.var()) {
                     seen_variables.insert(literal.var());
-                    let level = self.assignments[&literal.var()].level;
+                    let level = self.assignment_level(literal.var());
                     if level == self.decision_level() {
                         path_count += 1;
                     } else {
@@ -205,10 +205,8 @@ impl CDCL<'_> {
             if path_count == 0 {
                 break;
             } else {
-                conflict_clause = self.clauses[self.assignments[&resolving_literal.unwrap().var()]
-                    .reason
-                    .unwrap()]
-                .clone();
+                conflict_clause =
+                    self.clauses[self.assignment_reason(resolving_literal.unwrap().var())].clone();
             }
         }
         learnt_clause.push(!resolving_literal.unwrap());
@@ -234,6 +232,12 @@ impl CDCL<'_> {
         self.assignment_queue_pointer = self.assignment_trail.len();
         assert_eq!(self.decision_level(), backtrack_level);
     }
+
+    fn decide(&mut self, literal: Literal) {
+        self.decision_points.push(self.assignment_trail.len());
+        self.enqueue_assignment(literal, None);
+    }
+
     fn enqueue_assignment(&mut self, literal: Literal, reason: Option<ClauseIndex>) {
         assert!(self.is_unassigned(literal.var()));
         let a = Assignment {
@@ -245,9 +249,18 @@ impl CDCL<'_> {
         self.assignment_trail.push(literal);
     }
     fn next_decision_variable(&self) -> Option<VariableID> {
-        self.variables.all_ids().find(|v| self.is_unassigned(*v))
+        // TODO opportunity for optimization.
+        self.variables
+            .all_boolean_ids()
+            .find(|v| self.is_unassigned(*v))
     }
 
+    fn assignment_reason(&self, var: VariableID) -> ClauseIndex {
+        self.assignments[&var].reason.unwrap()
+    }
+    fn assignment_level(&self, var: VariableID) -> DecisionLevel {
+        self.assignments[&var].level
+    }
     fn is_assigned_true(&self, literal: &Literal) -> bool {
         if let Some(a) = self.assignments.get(&literal.var()) {
             a.value == literal.polarity()
