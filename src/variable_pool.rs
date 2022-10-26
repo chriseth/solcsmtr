@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::Iterator};
+use std::{collections::HashMap, iter::Iterator, ops::Deref};
 
 // different kinds of variables could share ID sets.
 // This way we would not need the compression in the linear solven.

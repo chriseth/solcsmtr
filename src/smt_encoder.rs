@@ -60,33 +60,13 @@ impl<'a> SMTEncoder<'a> {
                 let lit = self.parse_into_literal(&args[0]);
                 self.add_clause(vec![!lit]);
             }
-            (b"=" | b"<=", 2) => {
+            (b"=" | b"<=" | b"<" | b">=" | b">", 2) => {
                 if op == b"=" && self.determine_sort(&args[0]) == Sort::Bool {
                     let args = self.parse_into_literals(args);
                     self.add_clause(vec![!args[0], args[1]]);
                     self.add_clause(vec![args[0], !args[1]]);
                 } else {
-                    let left = self.parse_affine_expression(&args[0]);
-                    let right = self.parse_affine_expression(&args[1]);
-                    let (factor, var) =
-                        self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
-                    let is_negative = factor.is_negative();
-                    let constant = RationalWithDelta::from((right.0 - left.0) / factor);
-                    let mut bound = Bounds {
-                        lower: Some(constant.clone()),
-                        upper: Some(constant),
-                    };
-                    if op == b"<=" {
-                        bound.lower = None;
-                    }
-                    if is_negative && op != b"=" {
-                        bound = Bounds {
-                            lower: bound.upper,
-                            upper: bound.lower,
-                        };
-                    }
-                    // This is now reduced to: z = c
-                    self.fixed_bounds.entry(var.id).or_default().combine(bound);
+                    self.add_fixed_bound(op, &args[0], &args[1]);
                 }
             }
             (_, 0) => {
@@ -100,9 +80,42 @@ impl<'a> SMTEncoder<'a> {
             }
         }
     }
-}
 
-impl<'a> SMTEncoder<'a> {
+    fn add_fixed_bound(&mut self, op: &[u8], left: &SExpr, right: &SExpr) {
+        match op {
+            b">=" => self.add_fixed_bound(b"<=", right, left),
+            b">" => self.add_fixed_bound(b"<", right, left),
+            _ => {
+                let left = self.parse_affine_expression(left);
+                let right = self.parse_affine_expression(right);
+                let (factor, var) =
+                    self.extract_real_var_or_replace_by_equivalent(left.1 - right.1);
+                let is_negative = factor.is_negative();
+                let constant = RationalWithDelta::from((right.0 - left.0) / factor);
+                let mut bound = Bounds {
+                    lower: None,
+                    upper: Some(constant),
+                };
+                if op == b"=" {
+                    bound.lower = bound.upper.clone();
+                } else if op == b"<" {
+                    bound.upper = Some(if is_negative {
+                        bound.upper.unwrap() + RationalWithDelta::delta()
+                    } else {
+                        bound.upper.unwrap() - RationalWithDelta::delta()
+                    });
+                }
+                if is_negative && op != b"=" {
+                    bound = Bounds {
+                        lower: bound.upper,
+                        upper: bound.lower,
+                    };
+                }
+                self.fixed_bounds.entry(var.id).or_default().combine(bound);
+            }
+        }
+    }
+
     fn add_clause(&mut self, clause: Clause) {
         self.clauses.push(clause);
     }
@@ -168,7 +181,7 @@ impl<'a> SMTEncoder<'a> {
                         let less_or_equal = self.new_theory_predicate(var, constant.clone());
                         // !(x < c) is equivalent to x >= c
                         let less_than =
-                            self.new_theory_predicate(var, constant + RationalWithDelta::delta());
+                            self.new_theory_predicate(var, constant - RationalWithDelta::delta());
                         self.encode_and(less_or_equal, !less_than)
                     }
                 }
@@ -225,8 +238,12 @@ impl<'a> SMTEncoder<'a> {
 
     fn determine_sort(&self, e: &SExpr) -> Sort {
         if let SExpr::Symbol(s) = e {
-            let var = self.variable(s);
-            var.sort
+            if matches!(s[0], b'0'..=b'9') {
+                Sort::Real
+            } else {
+                let var = self.variable(s);
+                var.sort
+            }
         } else {
             match e.as_subexpr()[0].as_symbol() {
                 b"-" | b"+" | b"*" => Sort::Real,

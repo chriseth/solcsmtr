@@ -44,7 +44,7 @@ pub fn handle_commands(input: &mut impl Read, output: &mut impl Write) {
                 b"pop" => solver.pop(),
                 b"set-logic" => {}
                 b"check-sat" => {
-                    eprintln!("{}", solver);
+                    //eprintln!("{}", solver);
                     match solver.check() {
                         Some(true) => writeln!(output, "sat").unwrap(),
                         Some(false) => writeln!(output, "unsat").unwrap(),

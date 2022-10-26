@@ -403,9 +403,7 @@ mod test {
             },
             (Some(15.into()), Some(16.into())),
         );
-        println!("{}", solver.format(&pool));
         expect_reason(solver.feasible(), vec![12, 13, 15]);
-        println!("{}", solver.format(&pool));
         // Query again.
         expect_reason(solver.feasible(), vec![12, 13, 15]);
     }
@@ -443,7 +441,6 @@ mod test {
             },
             (Some(15.into()), Some(16.into())),
         );
-        println!("{}", solver.format(&pool));
         expect_reason(solver.feasible(), vec![11, 14, 16]);
     }
 }

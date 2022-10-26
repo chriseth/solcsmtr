@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Mul, Neg, Sub};
 
 use num_rational::BigRational;
 use num_traits::{FromPrimitive, One, Signed, Zero};
@@ -107,9 +107,20 @@ impl Sub for LinearExpression {
         for (i, y) in rhs {
             data.entry(i)
                 .and_modify(|x| *x = x.clone() - y.clone())
-                .or_insert(y);
+                .or_insert(-y);
         }
         LinearExpression(data.into_iter().filter(|(_, x)| !x.is_zero()).collect())
+    }
+}
+
+impl Neg for LinearExpression {
+    type Output = Self;
+
+    fn neg(mut self) -> Self {
+        for (_, value) in &mut self.0 {
+            *value = value.clone().neg();
+        }
+        self
     }
 }
 
@@ -131,6 +142,7 @@ pub mod test {
         assert_eq!(0 * x.clone(), Default::default());
         assert_eq!(x.clone() - x.clone(), Default::default());
         assert_eq!(3 * x.clone() + y.clone(), y.clone() + 3 * x.clone());
-        assert_eq!(3 * (x.clone() + y.clone()), 3 * y + 3 * x);
+        assert_eq!(3 * (x.clone() + y.clone()), 3 * y.clone() + 3 * x.clone());
+        assert_eq!(3 * (x.clone() - y.clone()), -(3 * y - 3 * x));
     }
 }

@@ -52,7 +52,7 @@ impl TheorySolver for LPTheory<'_> {
     fn assign(&mut self, var: VariableID, value: bool) {
         if let Some((rational_var, upper_bound)) = self.bounds_for_theory_predicates.get(&var) {
             if let Some((old_bounds, old_reasons)) = if value {
-                println!("Restricting {}", *rational_var);
+                //println!("Restricting {}", *rational_var);
                 self.solver.restrict_bounds_with_reason(
                     *rational_var,
                     Bounds {
@@ -62,8 +62,8 @@ impl TheorySolver for LPTheory<'_> {
                     (None, Some(!Literal::from(var))),
                 )
             } else {
-                println!("Restricting negated {}", *rational_var);
-                println!("{} >= {}",self.pool.name(*rational_var), upper_bound.clone() - RationalWithDelta::delta());
+                //println!("Restricting negated {}", *rational_var);
+                //println!("{} >= {}",self.pool.name(*rational_var), upper_bound.clone() - RationalWithDelta::delta());
                 self.solver.restrict_bounds_with_reason(
                     *rational_var,
                     Bounds {
@@ -80,9 +80,9 @@ impl TheorySolver for LPTheory<'_> {
     }
 
     fn set_trail_size(&mut self, trail_size: usize) {
-        println!("CDCL sets assignment trail size to {trail_size}");
+        //println!("CDCL sets assignment trail size to {trail_size}");
         if trail_size > self.trail_size {
-            println!("-> increment");
+            //println!("-> increment");
             // TODO optimization: store "previous good values",
             // but there was also another (better) technique that re-computed them.
         } else if trail_size < self.trail_size {
@@ -91,23 +91,22 @@ impl TheorySolver for LPTheory<'_> {
                     break;
                 }
                 let (_, var, bounds, reasons) = self.stored_bounds.pop().unwrap();
-                println!("undoing {}", var);
+                //println!("undoing {}", var);
                 self.solver.set_bounds_with_reason(var, bounds, reasons)
             }
-            println!(
-                "Solver after resetting trail size:\n{}------------------",
-                &self.solver.format(&self.pool)
-            );
-    
+            // //println!(
+            //     "Solver after resetting trail size:\n{}------------------",
+            //     &self.solver.format(&self.pool)
+            // );
         }
         self.trail_size = trail_size;
     }
 
     fn solve(&mut self) -> Option<Clause> {
-        println!(
-            "CDCL asks us to run solver:\n{}------------------",
-            &self.solver.format(&self.pool)
-        );
+        // println!(
+        //     "CDCL asks us to run solver:\n{}------------------",
+        //     &self.solver.format(&self.pool)
+        // );
         self.solver.feasible()
     }
 
@@ -141,7 +140,7 @@ impl SMTSolver {
         todo!();
     }
     pub fn check(&mut self) -> Option<bool> {
-        println!("============ check ================");
+        //println!("============ check ================");
         // TODO we could keep the state of the lp solver for longer.
         let mut lp_theory = LPTheory::new(&self.bounds_for_theory_predicates, &self.variables);
         for (var, bounds) in &self.fixed_bounds {
@@ -152,7 +151,7 @@ impl SMTSolver {
                 .solver
                 .append_row(*basic_var, linear_expr.iter().cloned());
         }
-        println!("{}", lp_theory.solver.format(&self.variables));
+        //println!("{}", lp_theory.solver.format(&self.variables));
         if lp_theory.solver.feasible().is_some() {
             return Some(false);
         }
@@ -229,6 +228,33 @@ mod test {
         s
     }
 
+    fn test_parsing(input: &str, output: &str) {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(input.as_bytes()));
+        assert_eq!(s.fixed_bounds.len(), 1);
+        assert_eq!(
+            s.fixed_bounds
+                .iter()
+                .next()
+                .unwrap()
+                .1
+                .format("x")
+                .as_str()
+                .trim(),
+            output
+        );
+    }
+
+    #[test]
+    fn parse_lt() {
+        test_parsing("(< x 7)", "x   <= 7 + -1d");
+        test_parsing("(< 7 x)", "7 + 1d <=  x");
+        test_parsing("(> 7 x)", "x   <= 7 + -1d");
+        test_parsing("(> x 7)", "7 + 1d <=  x");
+        test_parsing("(= x 7)", "7 <=  x   <= 7");
+        test_parsing("(= 7 x)", "7 <=  x   <= 7");
+    }
+
     #[test]
     fn simple_bounds() {
         let mut s = setup();
@@ -245,7 +271,7 @@ mod test {
         assert!(s.check() == Some(true));
         s.add_assertion(&parse_sexpr(b"(<= x 2)"));
         assert!(s.check() == Some(true));
-        s.add_assertion(&parse_sexpr(b"(<= 2 y)"));
+        s.add_assertion(&parse_sexpr(b"(> 2 y)"));
         assert!(s.check() == Some(false));
     }
     #[test]
@@ -256,7 +282,6 @@ mod test {
         s.add_assertion(&parse_sexpr(b"(<= x 2)"));
         assert!(s.check() == Some(true));
         s.add_assertion(&parse_sexpr(b"(<= 1 y)"));
-        println!("{}", s);
         assert!(s.check() == Some(false));
     }
     #[test]
@@ -267,7 +292,6 @@ mod test {
         s.add_assertion(&parse_sexpr(b"(not b)"));
         assert!(s.check() == Some(true));
         s.add_assertion(&parse_sexpr(b"(a)"));
-        println!("{}", s);
         assert!(s.check() == Some(false));
     }
     #[test]
@@ -278,7 +302,32 @@ mod test {
         s.add_assertion(&parse_sexpr(b"(= x 8)"));
         assert!(s.check() == Some(true));
         s.add_assertion(&parse_sexpr(b"(= y 2)"));
-        println!("{}", s);
+        assert!(s.check() == Some(false));
+    }
+    #[test]
+    fn eq_zero() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(or (= x 0))"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(or (> x 0))"));
+        assert!(s.check() == Some(false));
+    }
+    #[test]
+    fn greater_than() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(> x 7)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(< x 8)"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(> 7 x)"));
+        assert!(s.check() == Some(false));
+    }
+    #[test]
+    fn eq_zero_split() {
+        let mut s = setup();
+        s.add_assertion(&parse_sexpr(b"(and (<= x 0) (>= x 0))"));
+        assert!(s.check() == Some(true));
+        s.add_assertion(&parse_sexpr(b"(and (> x 0))"));
         assert!(s.check() == Some(false));
     }
 }
